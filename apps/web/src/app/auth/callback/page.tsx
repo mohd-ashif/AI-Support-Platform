@@ -1,0 +1,79 @@
+"use client";
+
+import React, { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useDispatch } from "react-redux";
+import { setAuth, setAuthStatus } from "@/store/slices/authSlice";
+import { apiFetch, setMemoryAccessToken } from "@/lib/api";
+import { Loader2, Bot } from "lucide-react";
+
+export default function AuthCallbackPage() {
+  const router = useRouter();
+  const dispatch = useDispatch();
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function bootstrapOAuthSession() {
+      try {
+        const refreshData = await apiFetch("/auth/refresh", { method: "POST" });
+        if (refreshData?.access_token) {
+          setMemoryAccessToken(refreshData.access_token);
+          const userRes = await apiFetch("/auth/me");
+          const workspacesRes = await apiFetch("/workspaces");
+
+          dispatch(
+            setAuth({
+              user: userRes,
+              accessToken: refreshData.access_token,
+              workspaces: workspacesRes || [],
+            })
+          );
+
+          if (workspacesRes && workspacesRes.length > 0) {
+            const activeWs = workspacesRes[0];
+            if (activeWs.status === "onboarding") {
+              router.push("/onboarding/subscription");
+            } else {
+              router.push("/dashboard");
+            }
+          } else {
+            router.push("/onboarding/business");
+          }
+        } else {
+          dispatch(setAuthStatus("unauthenticated"));
+          router.push("/login");
+        }
+      } catch (err: any) {
+        setError(err.message || "Failed to complete Google sign in.");
+        dispatch(setAuthStatus("unauthenticated"));
+        setTimeout(() => router.push("/login"), 2500);
+      }
+    }
+
+    bootstrapOAuthSession();
+  }, [dispatch, router]);
+
+  return (
+    <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-6">
+      <div className="w-full max-w-sm bg-[#111111] border border-[#222222] rounded-2xl p-8 text-center space-y-6 shadow-2xl">
+        <div className="mx-auto h-12 w-12 rounded-xl bg-gradient-to-tr from-[#D4AF37] via-[#F4D03F] to-[#FFEAA7] flex items-center justify-center shadow-lg shadow-[#D4AF37]/20">
+          <Bot className="h-7 w-7 text-[#050505]" />
+        </div>
+
+        {error ? (
+          <div className="space-y-2">
+            <h3 className="text-lg font-bold text-red-400">Authentication Failed</h3>
+            <p className="text-xs text-neutral-400">{error}</p>
+            <p className="text-[10px] text-neutral-500">Redirecting to login...</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <Loader2 className="h-6 w-6 animate-spin text-[#D4AF37] mx-auto" />
+            <h3 className="text-base font-bold text-white">Completing Secure Sign In...</h3>
+            <p className="text-xs text-neutral-400">Establishing your encrypted workspace session</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

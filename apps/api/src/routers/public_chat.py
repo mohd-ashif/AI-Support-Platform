@@ -1,0 +1,316 @@
+import logging
+from datetime import timedelta
+from typing import Optional, List
+from fastapi import APIRouter, Depends, HTTPException, Header, status
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
+
+from apps.api.src.database.session import get_db
+from apps.api.src.models.core import (
+    Workspace,
+    Conversation,
+    Message,
+    Plan,
+    Subscription,
+    utc_now,
+    generate_uuid,
+)
+from apps.api.src.services.rate_limiter import check_rate_limits
+from apps.api.src.graph.agent_graph import (
+    GraphState,
+    retrieve_knowledge_chunks,
+    evaluate_tool_router,
+    run_reasoner_node,
+)
+
+logger = logging.getLogger("public_chat_router")
+
+router = APIRouter(prefix="/public", tags=["public_chat"])
+
+class ConversationCreateRequest(BaseModel):
+    visitor_id: str
+
+class ConversationResponse(BaseModel):
+    conversation_id: str
+    workspace_uuid: str
+    status: str
+    is_reused: bool
+
+class MessageCreateRequest(BaseModel):
+    visitor_id: str
+    content: str
+
+class MessageResponse(BaseModel):
+    id: str
+    conversation_id: str
+    sender_type: str  # visitor, ai, agent
+    content: str
+    created_at: str
+    should_escalate: bool = False
+
+@router.post("/{workspace_uuid}/conversations", response_model=ConversationResponse)
+async def create_or_reuse_conversation(
+    workspace_uuid: str,
+    payload: ConversationCreateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    # Step 6: Validate workspace_uuid and active status
+    res_ws = await db.execute(
+        select(Workspace).where(Workspace.workspace_uuid == workspace_uuid)
+    )
+    ws = res_ws.scalars().first()
+    if not ws:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Public workspace not found.",
+        )
+
+    # Note: past_due is intentionally allowed per product requirements
+    if ws.status == "canceled":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Workspace subscription is inactive.",
+        )
+
+    # Step 6 REUSE logic: Check if thread exists within past 24 hours & not resolved
+    # Note: Preview visitors (preview_visitor_...) skip 24h reuse to guarantee fresh testing threads
+    if not payload.visitor_id.startswith("preview_visitor_"):
+        cutoff = utc_now() - timedelta(hours=24)
+        res_conv = await db.execute(
+            select(Conversation).where(
+                Conversation.workspace_id == ws.id,
+                Conversation.visitor_id == payload.visitor_id,
+                Conversation.status != "resolved",
+                Conversation.created_at >= cutoff,
+            ).order_by(Conversation.created_at.desc())
+        )
+        existing_conv = res_conv.scalars().first()
+
+        if existing_conv:
+            return ConversationResponse(
+                conversation_id=existing_conv.id,
+                workspace_uuid=workspace_uuid,
+                status=existing_conv.status,
+                is_reused=True,
+            )
+
+    # Create fresh conversation
+    new_conv = Conversation(
+        workspace_id=ws.id,
+        visitor_id=payload.visitor_id,
+        status="bot",
+    )
+    db.add(new_conv)
+    await db.commit()
+    await db.refresh(new_conv)
+
+    return ConversationResponse(
+        conversation_id=new_conv.id,
+        workspace_uuid=workspace_uuid,
+        status=new_conv.status,
+        is_reused=False,
+    )
+
+@router.post("/{workspace_uuid}/conversations/{conversation_id}/messages", response_model=MessageResponse)
+async def send_public_message(
+    workspace_uuid: str,
+    conversation_id: str,
+    payload: MessageCreateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    # Step 7: Abuse-prevention sliding-window rate limit
+    await check_rate_limits(payload.visitor_id, workspace_uuid)
+
+    res_ws = await db.execute(
+        select(Workspace).where(Workspace.workspace_uuid == workspace_uuid)
+    )
+    ws = res_ws.scalars().first()
+    if not ws:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+
+    res_conv = await db.execute(
+        select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.workspace_id == ws.id,
+        )
+    )
+    conv = res_conv.scalars().first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation thread not found.")
+
+    # 1. Record Visitor Message in DB
+    user_msg = Message(
+        conversation_id=conv.id,
+        sender_type="visitor",
+        content=payload.content,
+    )
+    db.add(user_msg)
+    await db.commit()
+
+    # Emit visitor message event immediately to Inbox & Widget
+    try:
+        from apps.api.src.socket_app import emit_to_workspace, emit_to_conversation
+        visitor_msg_payload = {
+            "id": user_msg.id,
+            "conversation_id": conv.id,
+            "workspace_id": ws.id,
+            "sender_type": "visitor",
+            "content": user_msg.content,
+            "created_at": user_msg.created_at.isoformat(),
+        }
+        await emit_to_workspace(ws.id, "message:new", visitor_msg_payload)
+        await emit_to_conversation(conv.id, "message:new", visitor_msg_payload)
+    except Exception as err:
+        logger.warning(f"Failed to emit visitor message socket event: {err}")
+
+    try:
+        # STEP 4: If status="human", do NOT enqueue AI task!
+        if conv.status == "human":
+            logger.info(f"[DEBUG-RAG] conv status is human — skipping AI task enqueue")
+            return MessageResponse(
+                id=user_msg.id,
+                conversation_id=conv.id,
+                sender_type="visitor",
+                content=user_msg.content,
+                created_at=user_msg.created_at.isoformat(),
+                should_escalate=True,
+            )
+
+        # Fetch Conversation History (last 6 messages)
+        history_res = await db.execute(
+            select(Message)
+            .where(Message.conversation_id == conv.id)
+            .order_by(Message.created_at.desc())
+            .limit(6)
+        )
+        history_messages = list(reversed(history_res.scalars().all()))
+        history_tuples = [
+            {"role": "user" if m.sender_type == "visitor" else "assistant", "content": m.content}
+            for m in history_messages[:-1]
+        ]
+
+        # Launch AI reasoning generation via Groq
+        async def _generate_ai_response():
+            import sys
+            import importlib
+            from apps.api.src.database.session import AsyncSessionLocal
+            from apps.api.src.socket_app import emit_to_workspace, emit_to_conversation
+            
+            # Dynamic reload of agent_graph to guarantee latest prompt & Groq settings in RAM
+            try:
+                import apps.api.src.graph.agent_graph as agent_graph_module
+                importlib.reload(agent_graph_module)
+            except ModuleNotFoundError:
+                import src.graph.agent_graph as agent_graph_module
+                importlib.reload(agent_graph_module)
+
+            retrieve_knowledge_chunks = agent_graph_module.retrieve_knowledge_chunks
+            run_reasoner_node = agent_graph_module.run_reasoner_node
+            GraphState = agent_graph_module.GraphState
+            
+            async with AsyncSessionLocal() as bg_db:
+                # Re-check status
+                res_c = await bg_db.execute(select(Conversation).where(Conversation.id == conv.id))
+                c_obj = res_c.scalars().first()
+                if not c_obj or c_obj.status == "human":
+                    return
+
+                chunks, max_confidence = await retrieve_knowledge_chunks(
+                    workspace_id=ws.id,
+                    query=payload.content,
+                    db=bg_db,
+                )
+                state: GraphState = {
+                    "workspace_id": ws.id,
+                    "conversation_id": conv.id,
+                    "visitor_message": payload.content,
+                    "conversation_history": history_tuples,
+                    "retrieved_chunks": chunks,
+                    "retrieval_confidence": max_confidence,
+                    "turn_count_unresolved": 0 if max_confidence >= 0.5 else 1,
+                    "should_escalate": False,
+                    "response_text": "",
+                }
+                ai_text, should_esc = await run_reasoner_node(state, db=bg_db)
+                if should_esc:
+                    c_obj.status = "human"
+                    await bg_db.commit()
+
+                ai_msg = Message(
+                    conversation_id=conv.id,
+                    sender_type="ai",
+                    content=ai_text,
+                )
+                bg_db.add(ai_msg)
+                await bg_db.commit()
+                await bg_db.refresh(ai_msg)
+
+                msg_payload = {
+                    "id": ai_msg.id,
+                    "conversation_id": conv.id,
+                    "workspace_id": ws.id,
+                    "sender_type": "ai",
+                    "content": ai_text,
+                    "created_at": ai_msg.created_at.isoformat(),
+                    "should_escalate": should_esc,
+                }
+                await emit_to_conversation(conv.id, "message:new", msg_payload)
+                await emit_to_workspace(ws.id, "message:new", msg_payload)
+                if should_esc:
+                    await emit_to_conversation(conv.id, "conversation:status_changed", {"status": "human"})
+
+        asyncio.create_task(_generate_ai_response())
+
+        return MessageResponse(
+            id=user_msg.id,
+            conversation_id=conv.id,
+            sender_type="visitor",
+            content=user_msg.content,
+            created_at=user_msg.created_at.isoformat(),
+            should_escalate=False,
+        )
+    except Exception as e:
+        logger.error(f"[DEBUG-PHASE11] Top-level pipeline error boundary caught exception: {e}", exc_info=True)
+        # Top-level fallback response ensuring client NEVER hangs
+        fallback_msg = Message(
+            conversation_id=conv.id,
+            sender_type="ai",
+            content="I apologize, but I ran into a technical issue. Let me connect you with our human support team right away.",
+        )
+        conv.status = "human"
+        db.add(fallback_msg)
+        await db.commit()
+        await db.refresh(fallback_msg)
+
+        return MessageResponse(
+            id=fallback_msg.id,
+            conversation_id=conv.id,
+            sender_type="ai",
+            content=fallback_msg.content,
+            created_at=fallback_msg.created_at.isoformat(),
+            should_escalate=True,
+        )
+
+@router.get("/{workspace_uuid}/conversations/{conversation_id}/messages", response_model=List[MessageResponse])
+async def get_public_messages(
+    workspace_uuid: str,
+    conversation_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    res_msg = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.created_at.asc())
+    )
+    messages = res_msg.scalars().all()
+    return [
+        MessageResponse(
+            id=m.id,
+            conversation_id=m.conversation_id,
+            sender_type=m.sender_type,
+            content=m.content,
+            created_at=m.created_at.isoformat(),
+        )
+        for m in messages
+    ]
