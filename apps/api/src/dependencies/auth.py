@@ -63,11 +63,17 @@ async def get_current_workspace_member(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> TeamMember:
-    if not x_workspace_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="X-Workspace-Id header is required for workspace dashboard routes",
+    if not x_workspace_id or x_workspace_id == "undefined" or x_workspace_id == "null":
+        result = await db.execute(
+            select(TeamMember).where(TeamMember.user_id == current_user.id).order_by(TeamMember.joined_at.asc())
         )
+        member = result.scalars().first()
+        if not member:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No active workspace membership found for this user",
+            )
+        return member
     return await get_workspace_membership(x_workspace_id, current_user, db)
 
 def require_role(allowed_roles: List[str]):

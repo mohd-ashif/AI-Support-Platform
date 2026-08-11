@@ -124,11 +124,17 @@ async def get_analytics_summary(
 
     cache_key = f"analytics:summary:{member.workspace_id}:{range_str}"
     
+    from apps.api.src.services.cache_service import get_cache, set_cache
+    cached_data = get_cache(cache_key)
+    if cached_data:
+        return AnalyticsSummaryResponse(**cached_data)
+
     # Try Redis Cache
     try:
-        cached_data = await redis_client.get(cache_key)
-        if cached_data:
-            return AnalyticsSummaryResponse(**json.loads(cached_data))
+        if redis_client:
+            redis_data = await redis_client.get(cache_key)
+            if redis_data:
+                return AnalyticsSummaryResponse(**json.loads(redis_data))
     except Exception as e:
         logger.warning(f"Redis analytics cache read fallback: {e}")
 

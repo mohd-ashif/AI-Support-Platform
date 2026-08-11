@@ -18,3 +18,24 @@ export interface Conversation {
   visitor_id: string;
   status: 'open' | 'closed' | 'human_takeover';
 }
+
+export interface AnalyticsSeriesItem {
+  date: string;
+  conversations_count: number;
+  ai_resolved_count: number;
+  avg_response_ms: number;
+}
+
+export interface TopQuestion {
+  question: string;
+  count: number;
+}
+
+export interface AnalyticsSummary {
+  total_conversations: number;
+  overall_resolution_rate: number;
+  avg_response_ms: number;
+  csat_score: number | null;
+  series: AnalyticsSeriesItem[];
+  top_questions: TopQuestion[];
+}

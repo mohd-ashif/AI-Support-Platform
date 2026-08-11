@@ -24,6 +24,8 @@ import {
   Compass,
   MessageCircle,
   Zap,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 
 interface ContentCard {
@@ -221,21 +223,26 @@ export default function WidgetSetupPage() {
   const [previewMessages, setPreviewMessages] = useState<{ sender: "user" | "bot"; content: string }[]>([]);
   const [previewSending, setPreviewSending] = useState(false);
   const [previewConvId, setPreviewConvId] = useState<string | null>(null);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
   const previewChatRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (previewChatRef.current) {
-      previewChatRef.current.scrollTop = previewChatRef.current.scrollHeight;
+      previewChatRef.current.scrollTo({
+        top: previewChatRef.current.scrollHeight,
+        behavior: "smooth",
+      });
     }
   }, [previewMessages, previewSending]);
 
   // Live stream incoming AI and human operator replies into preview chat
   useEffect(() => {
     if (!previewConvId || !embedUuid) return;
+    let active = true;
     const interval = setInterval(async () => {
       try {
         const msgs = await apiFetch(`/public/${embedUuid}/conversations/${previewConvId}/messages`);
-        if (Array.isArray(msgs)) {
+        if (active && Array.isArray(msgs) && msgs.length > 0) {
           const formatted = msgs.map((m: any) => ({
             sender: (m.sender_type === "visitor" ? "user" : "bot") as "user" | "bot",
             content: m.content,
@@ -247,32 +254,46 @@ export default function WidgetSetupPage() {
           }
         }
       } catch (e) {}
-    }, 1500);
-    return () => clearInterval(interval);
+    }, 1200);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
   }, [previewConvId, embedUuid]);
 
   const handleResetPreviewChat = () => {
     setPreviewConvId(null);
     setPreviewMessages([]);
     setPreviewSending(false);
+    setPreviewInputText("");
   };
 
   const handleSendPreviewMessage = async (overrideText?: string) => {
     const textToSend = overrideText || previewInputText.trim();
     if (!textToSend || previewSending) return;
 
+    // 1. Optimistically display user message immediately in chat window
+    setPreviewMessages((prev) => [...prev, { sender: "user", content: textToSend }]);
     if (!overrideText) setPreviewInputText("");
     setPreviewSending(true);
 
     try {
+      let convId = previewConvId;
       const visitorId = "preview_visitor_" + Date.now();
-      const convRes = await apiFetch(`/public/${embedUuid}/conversations`, {
-        method: "POST",
-        body: JSON.stringify({ visitor_id: visitorId }),
-      });
-      if (convRes && convRes.conversation_id) {
-        const convId = convRes.conversation_id;
-        setPreviewConvId(convId);
+
+      // Create conversation if one does not exist yet
+      if (!convId) {
+        const convRes = await apiFetch(`/public/${embedUuid}/conversations`, {
+          method: "POST",
+          body: JSON.stringify({ visitor_id: visitorId }),
+        });
+        if (convRes && convRes.conversation_id) {
+          convId = convRes.conversation_id;
+          setPreviewConvId(convId);
+        }
+      }
+
+      if (convId) {
         await apiFetch(`/public/${embedUuid}/conversations/${convId}/messages`, {
           method: "POST",
           body: JSON.stringify({ visitor_id: visitorId, content: textToSend }),
@@ -638,11 +659,17 @@ export default function WidgetSetupPage() {
             </div>
 
             {/* Floating Simulated Chat Dialog Box */}
-            <div className="bg-[#111111] border border-[#262626] rounded-2xl shadow-2xl overflow-hidden flex flex-col h-[420px] z-10 animate-in slide-in-from-bottom-4 duration-300">
+            <div
+              className={`bg-[#111111] border border-[#262626] rounded-2xl shadow-2xl overflow-hidden flex flex-col transition-all duration-300 ${
+                previewExpanded
+                  ? "fixed inset-4 md:inset-10 z-50 h-[calc(100vh-80px)] max-w-4xl mx-auto rounded-3xl border-[#333333] shadow-[0_0_50px_rgba(0,0,0,0.8)]"
+                  : "h-[480px] relative z-10"
+              }`}
+            >
               {/* Header with Dynamic Primary Color */}
               <div
                 style={{ backgroundColor: form.primary_color || "#D4AF37" }}
-                className="p-4 text-black flex items-center justify-between transition-colors duration-300"
+                className="p-4 text-black flex items-center justify-between transition-colors duration-300 shrink-0"
               >
                 <div className="flex items-center space-x-3">
                   {form.logo_url ? (
@@ -671,22 +698,31 @@ export default function WidgetSetupPage() {
                   </div>
                 </div>
                 <div className="flex items-center space-x-2">
-                  {previewMessages.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={handleResetPreviewChat}
-                      className="text-[10px] font-bold bg-black/20 hover:bg-black/30 px-2 py-0.5 rounded text-black transition-all"
-                      title="Reset Preview Conversation"
-                    >
-                      Reset Chat
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => setPreviewExpanded(!previewExpanded)}
+                    className="p-1 rounded bg-black/20 hover:bg-black/30 text-black transition-all"
+                    title={previewExpanded ? "Minimize Window" : "Expand Window"}
+                  >
+                    {previewExpanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleResetPreviewChat}
+                    className="text-[10px] font-bold bg-black/20 hover:bg-black/40 active:scale-95 px-2 py-1 rounded text-black transition-all cursor-pointer shadow-sm"
+                    title="Reset preview conversation and start a clean thread"
+                  >
+                    Reset Chat
+                  </button>
                   <div className="h-2 w-2 rounded-full bg-emerald-700 animate-pulse" title="Online" />
                 </div>
               </div>
 
-              {/* Chat Body & Messages */}
-              <div ref={previewChatRef} className="p-4 flex-1 space-y-3 overflow-y-auto overflow-x-hidden bg-[#0A0A0A] break-words">
+              {/* Chat Body & Messages with custom smooth scrollbar */}
+              <div
+                ref={previewChatRef}
+                className="p-4 flex-1 space-y-3 overflow-y-auto overflow-x-hidden bg-[#0A0A0A] break-words scroll-smooth [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-[#0D0D0D] [&::-webkit-scrollbar-thumb]:bg-[#333333] [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-[#D4AF37]"
+              >
                 {/* Greeting Bubble */}
                 <div className="flex items-start space-x-2">
                   <div

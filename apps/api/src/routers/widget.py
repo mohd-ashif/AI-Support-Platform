@@ -74,6 +74,12 @@ async def get_widget_config(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
+    from apps.api.src.services.cache_service import get_cache, set_cache
+    cache_key = f"supportai:cache:{member.workspace_id}:widget_config"
+    cached = get_cache(cache_key)
+    if cached:
+        return WidgetConfigResponse(**cached)
+
     res = await db.execute(select(WidgetConfig).where(WidgetConfig.workspace_id == member.workspace_id))
     config = res.scalars().first()
     if not config:
@@ -91,7 +97,7 @@ async def get_widget_config(
         await db.commit()
         await db.refresh(config)
 
-    return WidgetConfigResponse(
+    resp = WidgetConfigResponse(
         id=config.id,
         workspace_id=config.workspace_id,
         brand_name=config.brand_name or "SupportAI",
@@ -102,6 +108,8 @@ async def get_widget_config(
         content_cards_json=config.content_cards_json or [],
         updated_at=config.updated_at.isoformat() if config.updated_at else None,
     )
+    set_cache(cache_key, resp.model_dump(), ttl_seconds=60)
+    return resp
 
 @router.patch("/widget/config", response_model=WidgetConfigResponse)
 async def update_widget_config(
@@ -109,6 +117,10 @@ async def update_widget_config(
     member: TeamMember = Depends(require_role(["owner", "admin"])),
     db: AsyncSession = Depends(get_db),
 ):
+    from apps.api.src.services.cache_service import invalidate_cache
+    cache_key = f"supportai:cache:{member.workspace_id}:widget_config"
+    invalidate_cache(cache_key)
+
     res = await db.execute(select(WidgetConfig).where(WidgetConfig.workspace_id == member.workspace_id))
     config = res.scalars().first()
     if not config:
@@ -136,7 +148,7 @@ async def update_widget_config(
     await db.commit()
     await db.refresh(config)
 
-    return WidgetConfigResponse(
+    resp = WidgetConfigResponse(
         id=config.id,
         workspace_id=config.workspace_id,
         brand_name=config.brand_name or "SupportAI",
@@ -147,6 +159,7 @@ async def update_widget_config(
         content_cards_json=config.content_cards_json or [],
         updated_at=config.updated_at.isoformat() if config.updated_at else None,
     )
+    return resp
 
 # STEP 1 & 2: Public Widget Config Endpoint for Third-Party Websites
 @router.get("/public/widget-config", response_model=WidgetConfigResponse)

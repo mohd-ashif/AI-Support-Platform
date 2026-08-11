@@ -9,7 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, text
 
 from apps.api.src.database.session import get_db
-from apps.api.src.dependencies.auth import get_current_user, get_workspace_membership, require_role
+from apps.api.src.dependencies.auth import (
+    get_current_user,
+    get_workspace_membership,
+    get_current_workspace_member,
+    require_role,
+)
 from apps.api.src.models.core import (
     User,
     TeamMember,
@@ -25,7 +30,9 @@ from apps.api.src.models.core import (
     utc_now,
     generate_uuid,
 )
-from apps.api.src.services.ssrf_guard import validate_url_ssrf
+import logging
+
+logger = logging.getLogger("settings")
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -61,7 +68,7 @@ class TeamMemberItemResponse(BaseModel):
 
 @router.get("/team", response_model=List[TeamMemberItemResponse])
 async def list_team_members(
-    member: TeamMember = Depends(get_workspace_membership),
+    member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
     res = await db.execute(
@@ -123,8 +130,18 @@ async def create_team_invite(
     await db.commit()
     await db.refresh(invite)
 
-    # TODO: Replace returning direct link with transactional email provider integration
     invite_link = f"http://localhost:3000/invite/{token}"
+    try:
+        from apps.api.src.services.email_service import send_team_invitation_email
+        await send_team_invitation_email(
+            to_email=invite.email,
+            role=invite.role,
+            invite_link=invite_link,
+            workspace_name="SupportAI Workspace",
+        )
+    except Exception as e:
+        logger.warning(f"Failed to dispatch invitation email: {e}")
+
     return InviteResponse(
         id=invite.id,
         email=invite.email,
@@ -188,7 +205,7 @@ async def accept_invite(
 async def update_member_role(
     member_id: str,
     payload: RoleUpdateRequest,
-    member: TeamMember = Depends(get_workspace_membership),
+    member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
     res_target = await db.execute(
@@ -224,7 +241,7 @@ async def update_member_role(
 @router.delete("/team/{member_id}")
 async def remove_team_member(
     member_id: str,
-    member: TeamMember = Depends(get_workspace_membership),
+    member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
     res_target = await db.execute(
@@ -255,7 +272,7 @@ async def remove_team_member(
 # --- STEP 3: BILLING PORTAL ---
 @router.post("/billing/portal")
 async def create_billing_portal_session(
-    member: TeamMember = Depends(get_workspace_membership),
+    member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
     res_sub = await db.execute(

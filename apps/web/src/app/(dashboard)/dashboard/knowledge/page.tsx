@@ -218,7 +218,16 @@ export default function KnowledgeBasePage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1A1A1A]">
-              {allSources.length === 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={5} className="py-6 text-center text-neutral-400">
+                    <div className="flex items-center justify-center space-x-2">
+                      <Loader2 className="h-4 w-4 animate-spin text-[#D4AF37]" />
+                      <span>Loading knowledge sources...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : allSources.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="py-6 text-center text-neutral-500">
                     No knowledge sources indexed yet. Add a website URL or upload a file above.

@@ -18,7 +18,7 @@ from apps.api.src.services.ssrf_guard import validate_url_ssrf
 
 logger = logging.getLogger("crawler_service")
 
-CRAWLER_USER_AGENT = "SupportAI-Crawler/1.0 (+https://yourdomain.com/crawler-info)"
+CRAWLER_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 MAX_PAGES_DEFAULT = 30
 MAX_DEPTH_DEFAULT = 3
 FETCH_TIMEOUT_SECONDS = 10.0

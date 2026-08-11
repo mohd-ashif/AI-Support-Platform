@@ -4,12 +4,17 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 from apps.api.src.config.settings import settings
 
+import os
+
 logger = logging.getLogger("embedding_service")
 
 EMBEDDING_MODEL = "text-embedding-3-small"
 BATCH_SIZE = 100
 
 class EmbeddingGenerationError(Exception):
+    pass
+
+class ConfigurationError(Exception):
     pass
 
 @retry(
@@ -19,9 +24,18 @@ class EmbeddingGenerationError(Exception):
     reraise=True,
 )
 def fetch_embeddings_batch(texts: List[str]) -> List[List[float]]:
-    api_key = getattr(settings, "OPENAI_API_KEY", "") or ""
+    api_key = getattr(settings, "OPENAI_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
+    use_mock = getattr(settings, "USE_MOCK_EMBEDDINGS", False) or os.getenv("USE_MOCK_EMBEDDINGS", "").lower() in ("true", "1")
+
     if not api_key or "mock" in api_key.lower():
-        return [[0.01 * (i % 10)] * 1536 for i in range(len(texts))]
+        if use_mock:
+            logger.info("[EMBEDDING_SERVICE] Generating mock 1536-dim embeddings (USE_MOCK_EMBEDDINGS=true).")
+            return [[0.01 * (i % 10)] * 1536 for i in range(len(texts))]
+        else:
+            raise ConfigurationError(
+                "OPENAI_API_KEY is required for production embeddings (text-embedding-3-small). "
+                "Set OPENAI_API_KEY in .env or set USE_MOCK_EMBEDDINGS=true for offline testing."
+            )
 
     try:
         import openai
@@ -33,8 +47,10 @@ def fetch_embeddings_batch(texts: List[str]) -> List[List[float]]:
         )
         return [data.embedding for data in response.data]
     except Exception as e:
-        logger.warning(f"OpenAI embedding batch request failed: {e}. Falling back to mock 1536-dim embeddings.")
-        return [[0.01 * (i % 10)] * 1536 for i in range(len(texts))]
+        if use_mock:
+            logger.warning(f"[EMBEDDING_SERVICE] OpenAI embedding batch request failed: {e}. Falling back to mock 1536-dim embeddings.")
+            return [[0.01 * (i % 10)] * 1536 for i in range(len(texts))]
+        raise EmbeddingGenerationError(f"OpenAI Embeddings API call failed: {e}")
 
 def generate_embeddings_for_chunks(chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     if not chunks:

@@ -7,6 +7,7 @@ export default function App() {
   const [config, setConfig] = useState<any>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
 
   const apiBase = "http://localhost:8000";
@@ -44,7 +45,10 @@ export default function App() {
 
   useEffect(() => {
     if (bodyRef.current) {
-      bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+      bodyRef.current.scrollTo({
+        top: bodyRef.current.scrollHeight,
+        behavior: "smooth",
+      });
     }
   }, [messages, loading]);
 
@@ -90,17 +94,18 @@ export default function App() {
       {open && (
         <div
           style={{
-            width: 360,
-            height: 520,
+            width: expanded ? "min(85vw, 840px)" : 380,
+            height: expanded ? "min(85vh, 700px)" : 520,
             backgroundColor: "#0A0A0A",
             color: "#FFFFFF",
-            border: "1px solid #222222",
-            borderRadius: 16,
-            boxShadow: "0 16px 40px rgba(0, 0, 0, 0.5)",
+            border: "1px solid #282828",
+            borderRadius: 20,
+            boxShadow: "0 24px 60px rgba(0, 0, 0, 0.75)",
             marginBottom: 16,
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
+            transition: "all 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
           }}
         >
           {/* Header */}
@@ -119,12 +124,30 @@ export default function App() {
               <div style={{ fontSize: 14 }}>{config?.brand_name || "SupportAI Assistant"}</div>
               <div style={{ fontSize: 10, opacity: 0.85, fontWeight: 400 }}>{config?.tagline || "Instant AI Support"}</div>
             </div>
-            <button
-              onClick={() => setOpen(false)}
-              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, fontWeight: "bold" }}
-            >
-              ✕
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={() => setExpanded(!expanded)}
+                style={{
+                  background: "rgba(0,0,0,0.15)",
+                  border: "none",
+                  borderRadius: 6,
+                  padding: "4px 8px",
+                  cursor: "pointer",
+                  fontSize: 11,
+                  fontWeight: "bold",
+                  color: "#000000",
+                }}
+                title={expanded ? "Minimize Window" : "Expand Window"}
+              >
+                {expanded ? "🗗 Minimize" : "🗖 Expand"}
+              </button>
+              <button
+                onClick={() => setOpen(false)}
+                style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, fontWeight: "bold", color: "#000000" }}
+              >
+                ✕
+              </button>
+            </div>
           </div>
 
           {/* Body Messages */}
@@ -132,11 +155,12 @@ export default function App() {
             ref={bodyRef}
             style={{
               flex: 1,
-              padding: 14,
+              padding: 16,
               overflowY: "auto",
+              scrollBehavior: "smooth",
               display: "flex",
               flexDirection: "column",
-              gap: 10,
+              gap: 12,
               backgroundColor: "#050505",
             }}
           >

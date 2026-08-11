@@ -63,7 +63,10 @@ export default function SignupPage() {
         })
       );
 
-      if (response.workspaces && response.workspaces.length > 0) {
+      const redirectUrl = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("redirect") : null;
+      if (redirectUrl) {
+        router.push(redirectUrl);
+      } else if (response.workspaces && response.workspaces.length > 0) {
         router.push("/dashboard");
       } else {
         router.push("/onboarding");

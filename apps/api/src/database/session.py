@@ -9,6 +9,9 @@ def get_async_db_url(url: str) -> str:
     elif url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql+asyncpg://", 1)
 
+    if "-pooler." in url:
+        url = url.replace("-pooler.", ".", 1)
+
     if "asyncpg" in url:
         parsed = urlparse(url)
         if parsed.query:
@@ -32,8 +35,13 @@ engine_kwargs = {"echo": False}
 if "sqlite" not in db_url:
     engine_kwargs.update({
         "pool_pre_ping": True,
-        "pool_size": 10,
-        "max_overflow": 20,
+        "pool_recycle": 300,
+        "pool_size": 5,
+        "max_overflow": 10,
+        "connect_args": {
+            "command_timeout": 30,
+            "statement_cache_size": 0,
+        }
     })
 
 engine = create_async_engine(db_url, **engine_kwargs)
@@ -44,5 +52,11 @@ class Base(DeclarativeBase):
 
 async def get_db():
     async with AsyncSessionLocal() as session:
-        yield session
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
 

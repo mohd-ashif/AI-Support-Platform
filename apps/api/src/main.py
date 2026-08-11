@@ -58,11 +58,25 @@ except ModuleNotFoundError:
 
 logger = logging.getLogger("main")
 
+from fastapi.middleware.gzip import GZipMiddleware
+import time
+
 app = FastAPI(
     title="SupportAI API",
     description="Enterprise AI Customer Support Platform API",
     version="1.0.0",
 )
+
+@app.middleware("http")
+async def add_process_time_header(request, call_next):
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    process_time_ms = (time.perf_counter() - start_time) * 1000
+    response.headers["X-Process-Time"] = f"{process_time_ms:.2f}ms"
+    logger.info(f"[PERF] {request.method} {request.url.path} -> {response.status_code} ({process_time_ms:.2f}ms)")
+    return response
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # CORS Middleware
 app.add_middleware(
@@ -99,6 +113,12 @@ app.include_router(settings_router.router)
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "service": "SupportAI API"}
+
+from fastapi.responses import RedirectResponse
+
+@app.get("/api/v1/docs", include_in_schema=False)
+async def redirect_api_v1_docs():
+    return RedirectResponse(url="/docs")
 
 # Safely wrap FastAPI application with Socket.io ASGI app if socketio is installed
 try:

@@ -23,17 +23,38 @@ async def init():
         print(f"   [!] Extension note: {e}")
 
     print("2. Creating all platform database tables & migrating schema...")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        try:
-            await conn.execute(text("ALTER TABLE workspaces ADD COLUMN integration_viewed BOOLEAN DEFAULT FALSE"))
-        except Exception:
-            pass
-        try:
-            await conn.execute(text("ALTER TABLE workspaces ADD COLUMN widget_tested BOOLEAN DEFAULT FALSE"))
-        except Exception:
-            pass
-        print("   [✓] Tables and schema columns created/verified.")
+    print(f"   Found {len(Base.metadata.tables)} registered models: {list(Base.metadata.tables.keys())}")
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        print("   [✓] Tables created successfully.")
+        async with engine.begin() as conn:
+            try:
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_embedding_hnsw ON knowledge_chunks USING hnsw (embedding vector_cosine_ops);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sources_web_workspace_id ON sources_web (workspace_id);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sources_files_workspace_id ON sources_files (workspace_id);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_conversations_ws_created ON conversations (workspace_id, created_at DESC);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_messages_conv_created ON messages (conversation_id, created_at DESC);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_widget_configs_workspace_id ON widget_configs (workspace_id);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_api_keys_workspace_id ON api_keys (workspace_id);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_webhooks_workspace_id ON webhooks (workspace_id);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_subscriptions_workspace_id ON subscriptions (workspace_id);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_team_members_workspace_id ON team_members (workspace_id);"))
+                print("   [✓] HNSW vector index & B-Tree performance indexes created/verified.")
+            except Exception as e:
+                print(f"   [!] Index note: {e}")
+        
+        async with engine.begin() as conn:
+            try:
+                await conn.execute(text("ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS integration_viewed BOOLEAN DEFAULT FALSE;"))
+                await conn.execute(text("ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS widget_tested BOOLEAN DEFAULT FALSE;"))
+                await conn.execute(text("ALTER TABLE sources_web ADD COLUMN IF NOT EXISTS error_message VARCHAR;"))
+                await conn.execute(text("ALTER TABLE sources_files ADD COLUMN IF NOT EXISTS error_message VARCHAR;"))
+                await conn.execute(text("ALTER TABLE sources_files ADD COLUMN IF NOT EXISTS cloudinary_url VARCHAR DEFAULT '';"))
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"   [X] Error during table creation: {e}")
 
     print("3. Verifying active tables in Neon Console schema...")
     async with engine.connect() as conn:

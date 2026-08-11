@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -80,6 +81,12 @@ class SubscriptionResponse(BaseModel):
 
 @router.get("/plans", response_model=List[PlanResponse])
 async def get_plans(db: AsyncSession = Depends(get_db)):
+    from apps.api.src.services.cache_service import get_cache, set_cache
+    cache_key = "supportai:cache:global:plans"
+    cached_data = get_cache(cache_key)
+    if cached_data:
+        return [PlanResponse(**item) for item in cached_data]
+
     try:
         await ensure_billing_schema(db)
         res = await db.execute(select(Plan))
@@ -169,12 +176,12 @@ async def get_plans(db: AsyncSession = Depends(get_db)):
                 price_annual_display=a_display,
                 message_limit=p.message_limit or 100,
                 seat_limit=p.seat_limit or 1,
-                trial_days=p.trial_days,
                 stripe_price_id_monthly=p.stripe_price_id_monthly,
                 stripe_price_id_annual=p.stripe_price_id_annual,
                 features_json=p.features_json or {},
             )
         )
+    set_cache(cache_key, [item.model_dump() for item in output], ttl_seconds=3600)
     return output
 
 @router.get("/subscription", response_model=SubscriptionResponse)
@@ -289,7 +296,8 @@ async def create_checkout_session(
         stripe.api_key = settings.STRIPE_SECRET_KEY
 
         if not customer_id:
-            customer = stripe.Customer.create(
+            customer = await asyncio.to_thread(
+                stripe.Customer.create,
                 email=current_user.email,
                 metadata={"workspace_id": workspace.id},
             )
@@ -314,7 +322,8 @@ async def create_checkout_session(
                 "quantity": 1,
             }]
 
-        session = stripe.checkout.Session.create(
+        session = await asyncio.to_thread(
+            stripe.checkout.Session.create,
             customer=customer_id,
             payment_method_types=["card"],
             line_items=line_items,
@@ -367,7 +376,7 @@ async def check_checkout_status(
 
     try:
         if stripe:
-            session = stripe.checkout.Session.retrieve(session_id)
+            session = await asyncio.to_thread(stripe.checkout.Session.retrieve, session_id)
             ws_id = session.metadata.get("workspace_id") or workspace_id
             if ws_id:
                 sub_res = await db.execute(select(Subscription).where(Subscription.workspace_id == ws_id))

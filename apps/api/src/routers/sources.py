@@ -39,25 +39,22 @@ async def create_web_source(
     db: AsyncSession = Depends(get_db),
 ):
     import asyncio
-    try:
-        await db.execute(text("ALTER TABLE sources_web ADD COLUMN IF NOT EXISTS error_message VARCHAR;"))
-        await db.commit()
-    except Exception:
-        await db.rollback()
+    from apps.api.src.services.cache_service import invalidate_cache
+    invalidate_cache(f"supportai:cache:{member.workspace_id}:sources_web")
 
     source = await source_service.create_web_source_pending(
         db, workspace_id=member.workspace_id, url=payload.url
     )
 
-    # Dispatch via Celery durable RabbitMQ task queue
+    # Always run in-process background task for immediate ingestion, fallback if Celery is not active
+    asyncio.create_task(
+        source_service.ingest_web_source_background(member.workspace_id, source.id, source.url)
+    )
     try:
         from apps.api.src.celery_app import ingest_web_source_task
-        ingest_web_source_task.delay(source.id, member.workspace_id, source.url)
-    except Exception as e:
-        # Fallback to in-process async task if Celery worker / broker is unavailable
-        asyncio.create_task(
-            source_service.ingest_web_source_background(member.workspace_id, source.id, source.url)
-        )
+        ingest_web_source_task.apply_async(args=(source.id, member.workspace_id, source.url), expires=60)
+    except Exception:
+        pass
 
     return WebSourceResponse(
         id=source.id,
@@ -74,15 +71,15 @@ async def list_web_sources(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
-    try:
-        await db.execute(text("ALTER TABLE sources_web ADD COLUMN IF NOT EXISTS error_message VARCHAR;"))
-        await db.commit()
-    except Exception:
-        await db.rollback()
+    from apps.api.src.services.cache_service import get_cache, set_cache
+    cache_key = f"supportai:cache:{member.workspace_id}:sources_web"
+    cached = get_cache(cache_key)
+    if cached:
+        return [WebSourceResponse(**item) for item in cached]
 
     res = await db.execute(select(SourceWeb).where(SourceWeb.workspace_id == member.workspace_id))
     sources = res.scalars().all()
-    return [
+    resp = [
         WebSourceResponse(
             id=s.id,
             workspace_id=s.workspace_id,
@@ -94,6 +91,8 @@ async def list_web_sources(
         )
         for s in sources
     ]
+    set_cache(cache_key, [item.model_dump() for item in resp], ttl_seconds=10)
+    return resp
 
 @router.delete("/web/{source_id}")
 async def delete_web_source(
@@ -101,6 +100,9 @@ async def delete_web_source(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
+    from apps.api.src.services.cache_service import invalidate_cache
+    invalidate_cache(f"supportai:cache:{member.workspace_id}:sources_web")
+
     res = await db.execute(
         select(SourceWeb).where(SourceWeb.id == source_id, SourceWeb.workspace_id == member.workspace_id)
     )
@@ -123,6 +125,9 @@ async def recrawl_web_source(
     db: AsyncSession = Depends(get_db),
 ):
     import asyncio
+    from apps.api.src.services.cache_service import invalidate_cache
+    invalidate_cache(f"supportai:cache:{member.workspace_id}:sources_web")
+
     res = await db.execute(
         select(SourceWeb).where(SourceWeb.id == source_id, SourceWeb.workspace_id == member.workspace_id)
     )
@@ -133,19 +138,15 @@ async def recrawl_web_source(
     source.status = "pending"
     await db.commit()
 
-    try:
-        from apps.api.src.celery_app import ingest_web_source_task
-        ingest_web_source_task.delay(source.id, member.workspace_id, source.url)
-    except Exception:
-        asyncio.create_task(
-            source_service.ingest_web_source_background(member.workspace_id, source.id, source.url)
-        )
+    asyncio.create_task(
+        source_service.ingest_web_source_background(member.workspace_id, source.id, source.url)
+    )
 
     return WebSourceResponse(
         id=source.id,
         workspace_id=source.workspace_id,
         url=source.url,
-        status="pending",
+        status=source.status,
         page_count=source.page_count,
         last_crawled_at=source.last_crawled_at.isoformat() if source.last_crawled_at else None,
         error_message=getattr(source, "error_message", None),
@@ -158,27 +159,22 @@ async def create_file_source(
     db: AsyncSession = Depends(get_db),
 ):
     import asyncio
-    try:
-        await db.execute(text("ALTER TABLE sources_files ADD COLUMN IF NOT EXISTS error_message VARCHAR;"))
-        await db.execute(text("ALTER TABLE sources_files ADD COLUMN IF NOT EXISTS cloudinary_url VARCHAR DEFAULT '';"))
-        await db.execute(text("ALTER TABLE sources_files ADD COLUMN IF NOT EXISTS storage_url VARCHAR DEFAULT '';"))
-        await db.execute(text("ALTER TABLE sources_files ADD COLUMN IF NOT EXISTS file_size_bytes INTEGER DEFAULT 0;"))
-        await db.commit()
-    except Exception:
-        await db.rollback()
+    from apps.api.src.services.cache_service import invalidate_cache
+    invalidate_cache(f"supportai:cache:{member.workspace_id}:sources_files")
 
     content_bytes = await file.read()
     try:
         source, extracted_text = await source_service.create_file_source_pending(
             db, workspace_id=member.workspace_id, filename=file.filename, content_bytes=content_bytes
         )
+        asyncio.create_task(
+            source_service.ingest_file_source_background(member.workspace_id, source.id, extracted_text)
+        )
         try:
             from apps.api.src.celery_app import ingest_file_source_task
-            ingest_file_source_task.delay(source.id, member.workspace_id, extracted_text)
+            ingest_file_source_task.apply_async(args=(source.id, member.workspace_id, extracted_text), expires=60)
         except Exception:
-            asyncio.create_task(
-                source_service.ingest_file_source_background(member.workspace_id, source.id, extracted_text)
-            )
+            pass
     except HTTPException:
         raise
     except Exception as e:
@@ -199,18 +195,15 @@ async def list_file_sources(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
-    try:
-        await db.execute(text("ALTER TABLE sources_files ADD COLUMN IF NOT EXISTS error_message VARCHAR;"))
-        await db.execute(text("ALTER TABLE sources_files ADD COLUMN IF NOT EXISTS cloudinary_url VARCHAR DEFAULT '';"))
-        await db.execute(text("ALTER TABLE sources_files ADD COLUMN IF NOT EXISTS storage_url VARCHAR DEFAULT '';"))
-        await db.execute(text("ALTER TABLE sources_files ADD COLUMN IF NOT EXISTS file_size_bytes INTEGER DEFAULT 0;"))
-        await db.commit()
-    except Exception:
-        await db.rollback()
+    from apps.api.src.services.cache_service import get_cache, set_cache
+    cache_key = f"supportai:cache:{member.workspace_id}:sources_files"
+    cached = get_cache(cache_key)
+    if cached:
+        return [FileSourceResponse(**item) for item in cached]
 
     res = await db.execute(select(SourceFile).where(SourceFile.workspace_id == member.workspace_id))
     sources = res.scalars().all()
-    return [
+    resp = [
         FileSourceResponse(
             id=s.id,
             workspace_id=s.workspace_id,
@@ -222,6 +215,8 @@ async def list_file_sources(
         )
         for s in sources
     ]
+    set_cache(cache_key, [item.model_dump() for item in resp], ttl_seconds=10)
+    return resp
 
 @router.delete("/files/{source_id}")
 async def delete_file_source(
@@ -229,6 +224,9 @@ async def delete_file_source(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
+    from apps.api.src.services.cache_service import invalidate_cache
+    invalidate_cache(f"supportai:cache:{member.workspace_id}:sources_files")
+
     res = await db.execute(
         select(SourceFile).where(SourceFile.id == source_id, SourceFile.workspace_id == member.workspace_id)
     )

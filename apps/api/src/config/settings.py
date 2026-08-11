@@ -11,6 +11,13 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "super-secret-key-change-in-production"
     OPENAI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
+    USE_MOCK_EMBEDDINGS: bool = False
+
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "noreply@supportai.com"
     
     JWT_SECRET_KEY: str = "super-secret-jwt-key-change-in-production"
     JWT_ALGORITHM: str = "HS256"

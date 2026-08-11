@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from datetime import timedelta
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Header, status
@@ -147,17 +148,19 @@ async def send_public_message(
     )
     db.add(user_msg)
     await db.commit()
+    await db.refresh(user_msg)
 
     # Emit visitor message event immediately to Inbox & Widget
     try:
         from apps.api.src.socket_app import emit_to_workspace, emit_to_conversation
+        user_created_str = (user_msg.created_at or utc_now()).isoformat()
         visitor_msg_payload = {
             "id": user_msg.id,
             "conversation_id": conv.id,
             "workspace_id": ws.id,
             "sender_type": "visitor",
             "content": user_msg.content,
-            "created_at": user_msg.created_at.isoformat(),
+            "created_at": user_created_str,
         }
         await emit_to_workspace(ws.id, "message:new", visitor_msg_payload)
         await emit_to_conversation(conv.id, "message:new", visitor_msg_payload)
@@ -165,15 +168,16 @@ async def send_public_message(
         logger.warning(f"Failed to emit visitor message socket event: {err}")
 
     try:
-        # STEP 4: If status="human", do NOT enqueue AI task!
-        if conv.status == "human":
+        user_created_str = (user_msg.created_at or utc_now()).isoformat()
+        # STEP 4: If status="human", do NOT enqueue AI task (unless testing in preview mode)!
+        if conv.status == "human" and not payload.visitor_id.startswith("preview_visitor_"):
             logger.info(f"[DEBUG-RAG] conv status is human — skipping AI task enqueue")
             return MessageResponse(
                 id=user_msg.id,
                 conversation_id=conv.id,
                 sender_type="visitor",
                 content=user_msg.content,
-                created_at=user_msg.created_at.isoformat(),
+                created_at=user_created_str,
                 should_escalate=True,
             )
 
@@ -197,68 +201,84 @@ async def send_public_message(
             from apps.api.src.database.session import AsyncSessionLocal
             from apps.api.src.socket_app import emit_to_workspace, emit_to_conversation
             
-            # Dynamic reload of agent_graph to guarantee latest prompt & Groq settings in RAM
             try:
-                import apps.api.src.graph.agent_graph as agent_graph_module
-                importlib.reload(agent_graph_module)
-            except ModuleNotFoundError:
-                import src.graph.agent_graph as agent_graph_module
-                importlib.reload(agent_graph_module)
+                try:
+                    import apps.api.src.graph.agent_graph as agent_graph_module
+                    importlib.reload(agent_graph_module)
+                except ModuleNotFoundError:
+                    import src.graph.agent_graph as agent_graph_module
+                    importlib.reload(agent_graph_module)
 
-            retrieve_knowledge_chunks = agent_graph_module.retrieve_knowledge_chunks
-            run_reasoner_node = agent_graph_module.run_reasoner_node
-            GraphState = agent_graph_module.GraphState
-            
-            async with AsyncSessionLocal() as bg_db:
-                # Re-check status
-                res_c = await bg_db.execute(select(Conversation).where(Conversation.id == conv.id))
-                c_obj = res_c.scalars().first()
-                if not c_obj or c_obj.status == "human":
-                    return
+                retrieve_knowledge_chunks = agent_graph_module.retrieve_knowledge_chunks
+                run_reasoner_node = agent_graph_module.run_reasoner_node
+                GraphState = agent_graph_module.GraphState
+                
+                async with AsyncSessionLocal() as bg_db:
+                    res_c = await bg_db.execute(select(Conversation).where(Conversation.id == conv.id))
+                    c_obj = res_c.scalars().first()
+                    if not c_obj:
+                        return
+                    
+                    # For preview visitors, ensure conversation status allows AI processing
+                    if payload.visitor_id.startswith("preview_visitor_") and c_obj.status == "human":
+                        c_obj.status = "bot"
+                        await bg_db.commit()
+                    elif c_obj.status == "human":
+                        return
 
-                chunks, max_confidence = await retrieve_knowledge_chunks(
-                    workspace_id=ws.id,
-                    query=payload.content,
-                    db=bg_db,
-                )
-                state: GraphState = {
-                    "workspace_id": ws.id,
-                    "conversation_id": conv.id,
-                    "visitor_message": payload.content,
-                    "conversation_history": history_tuples,
-                    "retrieved_chunks": chunks,
-                    "retrieval_confidence": max_confidence,
-                    "turn_count_unresolved": 0 if max_confidence >= 0.5 else 1,
-                    "should_escalate": False,
-                    "response_text": "",
-                }
-                ai_text, should_esc = await run_reasoner_node(state, db=bg_db)
-                if should_esc:
-                    c_obj.status = "human"
+                    chunks, max_confidence = await retrieve_knowledge_chunks(
+                        workspace_id=ws.id,
+                        query=payload.content,
+                        db=bg_db,
+                    )
+                    state: GraphState = {
+                        "workspace_id": ws.id,
+                        "conversation_id": conv.id,
+                        "visitor_message": payload.content,
+                        "conversation_history": history_tuples,
+                        "retrieved_chunks": chunks,
+                        "retrieval_confidence": max_confidence,
+                        "turn_count_unresolved": 0 if max_confidence >= 0.5 else 1,
+                        "should_escalate": False,
+                        "response_text": "",
+                    }
+                    ai_text, should_esc = await run_reasoner_node(state, db=bg_db)
+                    
+                    # Do not escalate preview testing sessions
+                    if payload.visitor_id.startswith("preview_visitor_"):
+                        should_esc = False
+                    elif should_esc:
+                        c_obj.status = "human"
+                        await bg_db.commit()
+
+                    ai_msg = Message(
+                        conversation_id=conv.id,
+                        sender_type="ai",
+                        content=ai_text,
+                    )
+                    bg_db.add(ai_msg)
                     await bg_db.commit()
+                    await bg_db.refresh(ai_msg)
 
-                ai_msg = Message(
-                    conversation_id=conv.id,
-                    sender_type="ai",
-                    content=ai_text,
-                )
-                bg_db.add(ai_msg)
-                await bg_db.commit()
-                await bg_db.refresh(ai_msg)
-
-                msg_payload = {
-                    "id": ai_msg.id,
-                    "conversation_id": conv.id,
-                    "workspace_id": ws.id,
-                    "sender_type": "ai",
-                    "content": ai_text,
-                    "created_at": ai_msg.created_at.isoformat(),
-                    "should_escalate": should_esc,
-                }
-                await emit_to_conversation(conv.id, "message:new", msg_payload)
-                await emit_to_workspace(ws.id, "message:new", msg_payload)
-                if should_esc:
-                    await emit_to_conversation(conv.id, "conversation:status_changed", {"status": "human"})
+                    msg_payload = {
+                        "id": ai_msg.id,
+                        "conversation_id": conv.id,
+                        "workspace_id": ws.id,
+                        "sender_type": "ai",
+                        "content": ai_text,
+                        "created_at": ai_msg.created_at.isoformat(),
+                        "should_escalate": should_esc,
+                    }
+                    await emit_to_conversation(conv.id, "message:new", msg_payload)
+                    await emit_to_workspace(ws.id, "message:new", msg_payload)
+                    if should_esc:
+                        await emit_to_conversation(conv.id, "conversation:status_changed", {"status": "human"})
+            except Exception as bg_err:
+                import traceback
+                tb_str = traceback.format_exc()
+                err_detail = f"[{type(bg_err).__name__}]: {bg_err}"
+                logger.error(f"[EXPLICIT-DIAGNOSTIC-BG] Exception captured: {err_detail}\nTraceback:\n{tb_str}", exc_info=True)
+                print(f"[EXPLICIT-DIAGNOSTIC-BG] Exception captured: {err_detail}\nTraceback:\n{tb_str}", flush=True)
 
         asyncio.create_task(_generate_ai_response())
 
@@ -267,12 +287,16 @@ async def send_public_message(
             conversation_id=conv.id,
             sender_type="visitor",
             content=user_msg.content,
-            created_at=user_msg.created_at.isoformat(),
+            created_at=user_created_str,
             should_escalate=False,
         )
     except Exception as e:
-        logger.error(f"[DEBUG-PHASE11] Top-level pipeline error boundary caught exception: {e}", exc_info=True)
-        # Top-level fallback response ensuring client NEVER hangs
+        import traceback
+        tb_str = traceback.format_exc()
+        err_detail = f"[{type(e).__name__}]: {e}"
+        logger.error(f"[EXPLICIT-DIAGNOSTIC] Catch point exception: {err_detail}\nTraceback:\n{tb_str}", exc_info=True)
+        print(f"[EXPLICIT-DIAGNOSTIC] Catch point exception: {err_detail}\nTraceback:\n{tb_str}", flush=True)
+
         fallback_msg = Message(
             conversation_id=conv.id,
             sender_type="ai",
@@ -288,7 +312,7 @@ async def send_public_message(
             conversation_id=conv.id,
             sender_type="ai",
             content=fallback_msg.content,
-            created_at=fallback_msg.created_at.isoformat(),
+            created_at=(fallback_msg.created_at or utc_now()).isoformat(),
             should_escalate=True,
         )
 
@@ -310,7 +334,7 @@ async def get_public_messages(
             conversation_id=m.conversation_id,
             sender_type=m.sender_type,
             content=m.content,
-            created_at=m.created_at.isoformat(),
+            created_at=(m.created_at or utc_now()).isoformat(),
         )
         for m in messages
     ]

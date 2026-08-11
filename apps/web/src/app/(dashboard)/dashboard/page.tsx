@@ -244,24 +244,38 @@ export default function DashboardOverviewPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1A1A1A]">
-              {recentConversations.map((c) => (
-                <tr key={c.id} className="hover:bg-[#141414] transition-colors">
-                  <td className="py-3 font-semibold text-white">{c.visitor}</td>
-                  <td className="py-3 text-neutral-300">{c.topic}</td>
-                  <td className="py-3">
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                        c.status === "AI Resolved"
-                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                          : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
-                      }`}
-                    >
-                      {c.status}
-                    </span>
+              {loading ? (
+                <tr>
+                  <td colSpan={4} className="py-6 text-center text-neutral-400">
+                    Loading overview metrics...
                   </td>
-                  <td className="py-3 text-right text-neutral-500">{c.time}</td>
                 </tr>
-              ))}
+              ) : recentConversations.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="py-6 text-center text-neutral-500">
+                    No recent conversations recorded.
+                  </td>
+                </tr>
+              ) : (
+                recentConversations.map((c) => (
+                  <tr key={c.id} className="hover:bg-[#141414] transition-colors">
+                    <td className="py-3 font-semibold text-white">{c.visitor}</td>
+                    <td className="py-3 text-neutral-300">{c.topic}</td>
+                    <td className="py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                          c.status === "AI Resolved"
+                            ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                            : "bg-amber-500/10 text-amber-400 border border-amber-500/20"
+                        }`}
+                      >
+                        {c.status}
+                      </span>
+                    </td>
+                    <td className="py-3 text-right text-neutral-500">{c.time}</td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

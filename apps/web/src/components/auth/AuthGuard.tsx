@@ -36,7 +36,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     async function checkSession() {
-      if (pathname.startsWith("/auth/callback")) {
+      if (pathname.startsWith("/auth/callback") || pathname.startsWith("/invite")) {
         setInitializing(false);
         return;
       }

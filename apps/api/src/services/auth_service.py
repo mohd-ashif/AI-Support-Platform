@@ -107,8 +107,19 @@ async def rotate_refresh_token(
             detail="Invalid or revoked refresh token",
         )
     
-    # REUSE THEFT DETECTION: If token was already revoked, invalidate ALL tokens for this user!
+    # REUSE THEFT DETECTION WITH CONCURRENT REQUEST GRACE WINDOW
     if existing_token.revoked:
+        if existing_token.replaced_by_id:
+            res_next = await db.execute(select(RefreshToken).where(RefreshToken.id == existing_token.replaced_by_id))
+            next_token = res_next.scalars().first()
+            if next_token and not next_token.revoked and (utc_now() - next_token.created_at).total_seconds() < 30:
+                logger.info(f"Grace period: Handled concurrent refresh token request for user_id={existing_token.user_id}")
+                user = await get_user_by_id(db, existing_token.user_id)
+                new_raw_token = generate_refresh_token_string()
+                next_token.token_hash = hash_token(new_raw_token)
+                await db.commit()
+                return user, new_raw_token
+
         logger.warning(
             f"SECURITY ALERT: Refresh token reuse detected for user_id={existing_token.user_id}. Revoking all tokens."
         )

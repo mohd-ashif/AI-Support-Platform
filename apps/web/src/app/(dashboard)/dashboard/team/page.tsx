@@ -75,6 +75,8 @@ export default function TeamManagementPage() {
     }
   };
 
+  const [createdInvite, setCreatedInvite] = useState<{ email: string; role: string; link: string } | null>(null);
+
   const handleInviteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteEmail.trim() || !activeWs?.id) return;
@@ -87,11 +89,14 @@ export default function TeamManagementPage() {
         headers: { "X-Workspace-Id": activeWs.id },
         body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
       });
-      setSuccessMessage(`Invitation link created for ${inviteEmail}: ${res.invite_link || ""}`);
+      setCreatedInvite({
+        email: inviteEmail,
+        role: inviteRole,
+        link: res.invite_link || "",
+      });
       setInviteEmail("");
       setInviteModalOpen(false);
       fetchMembers();
-      setTimeout(() => setSuccessMessage(null), 6000);
     } catch (err: any) {
       setError(err.message || "Failed to invite team member");
     } finally {
@@ -204,6 +209,70 @@ export default function TeamManagementPage() {
         <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm flex items-center space-x-2">
           <CheckCircle2 className="h-4 w-4 shrink-0" />
           <span>{successMessage}</span>
+        </div>
+      )}
+
+      {/* Generated Team Invitation Details Box */}
+      {createdInvite && (
+        <div className="bg-[#111111] border border-[#D4AF37] rounded-2xl p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
+          <div className="flex items-center justify-between border-b border-[#222222] pb-3">
+            <div className="flex items-center space-x-2 text-[#D4AF37]">
+              <Sparkles className="h-5 w-5" />
+              <h3 className="text-sm font-extrabold">Team Invitation Created Successfully</h3>
+            </div>
+            <button
+              type="button"
+              onClick={() => setCreatedInvite(null)}
+              className="text-neutral-400 hover:text-white"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <p className="text-xs text-neutral-300">
+            Invitation token created for <strong className="text-white">{createdInvite.email}</strong> as an <span className="text-emerald-400 font-extrabold uppercase">{createdInvite.role}</span>. An email notification has been dispatched to their inbox!
+          </p>
+
+          <div className="bg-[#050505] border border-[#222222] rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <input
+              type="text"
+              readOnly
+              value={createdInvite.link}
+              className="w-full sm:flex-1 bg-transparent text-xs font-mono text-[#D4AF37] focus:outline-none truncate"
+            />
+            <div className="flex items-center space-x-2 shrink-0 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(createdInvite.link);
+                  alert("Invitation link copied to clipboard!");
+                }}
+                className="flex-1 sm:flex-initial px-3 py-1.5 rounded-lg bg-[#D4AF37] text-black font-bold text-xs hover:brightness-110 flex items-center justify-center space-x-1"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                <span>Copy Link</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const subject = encodeURIComponent("You're invited to join SupportAI Workspace");
+                  const body = encodeURIComponent(`Hi!\n\nYou have been invited to join SupportAI Workspace as ${createdInvite.role}.\n\nClick here to accept: ${createdInvite.link}`);
+                  window.open(`mailto:${createdInvite.email}?subject=${subject}&body=${body}`, "_blank");
+                }}
+                className="flex-1 sm:flex-initial px-3 py-1.5 rounded-lg bg-[#1F1F1F] border border-[#333333] text-neutral-200 hover:text-white font-bold text-xs"
+              >
+                Send Email App
+              </button>
+              <a
+                href={createdInvite.link}
+                target="_blank"
+                rel="noreferrer"
+                className="flex-1 sm:flex-initial px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30 font-bold text-xs text-center"
+              >
+                Open Page ↗
+              </a>
+            </div>
+          </div>
         </div>
       )}
 

@@ -23,8 +23,7 @@ from apps.api.src.services.embedding_service import generate_embeddings_for_chun
 logger = logging.getLogger("source_service")
 
 async def check_and_enforce_shared_sources_limit(db: AsyncSession, workspace_id: str) -> None:
-    # Fetch workspace and plan with FOR UPDATE lock
-    ws_res = await db.execute(select(Workspace).where(Workspace.id == workspace_id).with_for_update())
+    ws_res = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
     ws = ws_res.scalars().first()
     if not ws:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
@@ -131,26 +130,38 @@ async def ingest_web_source_background(
 ) -> None:
     from apps.api.src.database.session import AsyncSessionLocal
 
-    async with AsyncSessionLocal() as db:
-        try:
+    try:
+        async with AsyncSessionLocal() as db:
             res = await db.execute(select(SourceWeb).where(SourceWeb.id == source_id))
             source = res.scalars().first()
             if not source:
                 return
-
             source.status = "crawling"
             await db.commit()
 
-            crawled_pages = await crawl_website(url)
-            combined_text = "\n\n".join([f"=== Document: {p['title']} ({p['url']}) ===\n{p['text']}" for p in crawled_pages])
+        crawled_pages = await crawl_website(url)
+        combined_text = "\n\n".join([f"=== Document: {p['title']} ({p['url']}) ===\n{p['text']}" for p in crawled_pages])
 
-            await process_and_store_chunks(
-                db=db,
-                workspace_id=workspace_id,
-                source_type="web",
-                source_id=source.id,
-                raw_text=combined_text,
+        chunks_raw = chunk_text(combined_text, target_tokens=250, overlap_tokens=30)
+        chunks_with_embeddings = generate_embeddings_for_chunks(chunks_raw) if chunks_raw else []
+
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                delete(KnowledgeChunk).where(
+                    KnowledgeChunk.source_type == "web",
+                    KnowledgeChunk.source_id == source_id,
+                )
             )
+            for item in chunks_with_embeddings:
+                kc = KnowledgeChunk(
+                    workspace_id=workspace_id,
+                    source_type="web",
+                    source_id=source_id,
+                    content=item["content"],
+                    embedding=item.get("embedding"),
+                    token_count=item["token_count"],
+                )
+                db.add(kc)
 
             res = await db.execute(select(SourceWeb).where(SourceWeb.id == source_id))
             source = res.scalars().first()
@@ -159,18 +170,19 @@ async def ingest_web_source_background(
                 source.page_count = len(crawled_pages)
                 source.last_crawled_at = utc_now()
                 source.error_message = None
-                await db.commit()
-        except Exception as e:
-            logger.error(f"Web crawl failed for source {source_id}: {e}")
-            try:
+            await db.commit()
+    except Exception as e:
+        logger.error(f"Web crawl failed for source {source_id}: {e}")
+        try:
+            async with AsyncSessionLocal() as db:
                 res = await db.execute(select(SourceWeb).where(SourceWeb.id == source_id))
                 source = res.scalars().first()
                 if source:
                     source.status = "failed"
                     source.error_message = str(e)
                     await db.commit()
-            except Exception:
-                pass
+        except Exception:
+            pass
 
 async def create_file_source_pending(
     db: AsyncSession,
@@ -183,10 +195,10 @@ async def create_file_source_pending(
 
     extracted_text, file_size = extract_text_from_file(filename, content_bytes)
 
-    await check_and_enforce_shared_sources_limit(db, workspace_id)
-
     if not cloudinary_url:
         cloudinary_url = await upload_file_to_cloudinary(filename, content_bytes, folder="knowledge-sources")
+
+    await check_and_enforce_shared_sources_limit(db, workspace_id)
 
     source = SourceFile(
         workspace_id=workspace_id,
@@ -208,38 +220,51 @@ async def ingest_file_source_background(
 ) -> None:
     from apps.api.src.database.session import AsyncSessionLocal
 
-    async with AsyncSessionLocal() as db:
-        try:
+    try:
+        async with AsyncSessionLocal() as db:
             res = await db.execute(select(SourceFile).where(SourceFile.id == source_id))
             source = res.scalars().first()
             if not source:
                 return
-
             source.status = "processing"
             await db.commit()
 
-            await process_and_store_chunks(
-                db=db,
-                workspace_id=workspace_id,
-                source_type="file",
-                source_id=source.id,
-                raw_text=extracted_text,
+        chunks_raw = chunk_text(extracted_text, target_tokens=250, overlap_tokens=30)
+        chunks_with_embeddings = generate_embeddings_for_chunks(chunks_raw) if chunks_raw else []
+
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                delete(KnowledgeChunk).where(
+                    KnowledgeChunk.source_type == "file",
+                    KnowledgeChunk.source_id == source_id,
+                )
             )
+            for item in chunks_with_embeddings:
+                kc = KnowledgeChunk(
+                    workspace_id=workspace_id,
+                    source_type="file",
+                    source_id=source_id,
+                    content=item["content"],
+                    embedding=item.get("embedding"),
+                    token_count=item["token_count"],
+                )
+                db.add(kc)
 
             res = await db.execute(select(SourceFile).where(SourceFile.id == source_id))
             source = res.scalars().first()
             if source:
                 source.status = "ready"
                 source.error_message = None
-                await db.commit()
-        except Exception as e:
-            logger.error(f"File ingestion failed for source {source_id}: {e}")
-            try:
+            await db.commit()
+    except Exception as e:
+        logger.error(f"File ingestion failed for source {source_id}: {e}")
+        try:
+            async with AsyncSessionLocal() as db:
                 res = await db.execute(select(SourceFile).where(SourceFile.id == source_id))
                 source = res.scalars().first()
                 if source:
                     source.status = "failed"
                     source.error_message = str(e)
                     await db.commit()
-            except Exception:
-                pass
+        except Exception:
+            pass
