@@ -223,8 +223,55 @@ async def send_public_message(
                     if payload.visitor_id.startswith("preview_visitor_") and c_obj.status == "human":
                         c_obj.status = "bot"
                         await bg_db.commit()
-                    elif c_obj.status == "human":
-                        return
+                    # Check Monthly AI Message Quota
+                    if not payload.visitor_id.startswith("preview_visitor_"):
+                        sub_res = await bg_db.execute(select(Subscription).where(Subscription.workspace_id == ws.id))
+                        sub = sub_res.scalars().first()
+                        plan_id = (sub.plan_id if sub else None) or ws.plan_id
+                        plan = None
+                        if plan_id:
+                            p_res = await bg_db.execute(select(Plan).where((Plan.id == plan_id) | (Plan.name == plan_id)))
+                            plan = p_res.scalars().first()
+
+                        msg_limit = plan.message_limit if (plan and plan.message_limit is not None) else 100
+                        if msg_limit != -1:
+                            now = utc_now()
+                            period_start = (sub.current_period_end - timedelta(days=30)) if (sub and sub.current_period_end) else now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                            msg_cnt_res = await bg_db.execute(
+                                select(func.count(Message.id))
+                                .join(Conversation, Message.conversation_id == Conversation.id)
+                                .where(
+                                    Conversation.workspace_id == ws.id,
+                                    Message.sender_type == "ai",
+                                    Message.created_at >= period_start,
+                                )
+                            )
+                            used_cnt = msg_cnt_res.scalar() or 0
+                            if used_cnt >= msg_limit:
+                                c_obj.status = "human"
+                                await bg_db.commit()
+                                quota_text = "Monthly AI message limit reached for this workspace. A human agent will assist you shortly."
+                                quota_msg = Message(
+                                    conversation_id=conv.id,
+                                    sender_type="ai",
+                                    content=quota_text,
+                                )
+                                bg_db.add(quota_msg)
+                                await bg_db.commit()
+                                await bg_db.refresh(quota_msg)
+                                msg_payload = {
+                                    "id": quota_msg.id,
+                                    "conversation_id": conv.id,
+                                    "workspace_id": ws.id,
+                                    "sender_type": "ai",
+                                    "content": quota_text,
+                                    "created_at": quota_msg.created_at.isoformat(),
+                                    "should_escalate": True,
+                                }
+                                await emit_to_conversation(conv.id, "message:new", msg_payload)
+                                await emit_to_workspace(ws.id, "message:new", msg_payload)
+                                await emit_to_conversation(conv.id, "conversation:status_changed", {"status": "human"})
+                                return
 
                     chunks, max_confidence = await retrieve_knowledge_chunks(
                         workspace_id=ws.id,

@@ -3,10 +3,10 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Literal
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Header, Request, Response, status
+from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
+from sqlalchemy import select, text, func
 
 from apps.api.src.database.session import get_db
 from apps.api.src.dependencies.auth import get_current_user, get_workspace_membership
@@ -17,6 +17,8 @@ from apps.api.src.models.core import (
     Subscription,
     ProcessedStripeEvent,
     TeamMember,
+    Conversation,
+    Message,
     utc_now,
     generate_uuid,
 )
@@ -24,10 +26,9 @@ from apps.api.src.config.settings import settings
 
 logger = logging.getLogger("billing")
 
-async def ensure_billing_schema(db: AsyncSession):
+async def ensure_billing_schema(db: Optional[AsyncSession] = None):
+    from apps.api.src.database.session import AsyncSessionLocal
     cols = [
-        "ALTER TABLE plans ALTER COLUMN price_monthly DROP NOT NULL;",
-        "ALTER TABLE plans ALTER COLUMN price_annual DROP NOT NULL;",
         "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS current_period_end TIMESTAMP WITH TIME ZONE;",
         "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR;",
         "ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS stripe_sub_id VARCHAR;",
@@ -37,12 +38,17 @@ async def ensure_billing_schema(db: AsyncSession):
         "ALTER TABLE plans ADD COLUMN IF NOT EXISTS stripe_price_id_annual VARCHAR;",
         "ALTER TABLE plans ADD COLUMN IF NOT EXISTS trial_days INTEGER;",
     ]
-    for col_sql in cols:
-        try:
-            await db.execute(text(col_sql))
-            await db.commit()
-        except Exception:
-            await db.rollback()
+    try:
+        async with AsyncSessionLocal() as schema_db:
+            for col_sql in cols:
+                try:
+                    await schema_db.execute(text(col_sql))
+                    await schema_db.commit()
+                except Exception as col_err:
+                    logger.warning(f"Schema alter column notice: {col_err}")
+                    await schema_db.rollback()
+    except Exception as e:
+        logger.warning(f"ensure_billing_schema error: {e}")
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -73,11 +79,48 @@ class PlanResponse(BaseModel):
     features_json: dict
 
 class SubscriptionResponse(BaseModel):
-    plan_name: str
-    status: str
-    messages_used: int
-    messages_limit: int
-    seat_limit: int
+    id: Optional[str] = None
+    workspace_id: str = "default_workspace"
+    plan_id: str = "plan_free_trial"
+    plan_name: str = "Free Trial"
+    status: str = "trialing"
+    messages_used: int = 0
+    messages_limit: int = 100
+    seats_used: int = 1
+    seat_limit: int = 1
+    price_monthly_cents: int = 0
+    price_annual_cents: int = 0
+    price_monthly_display: str = "$0"
+    price_annual_display: str = "$0"
+    stripe_customer_id: Optional[str] = None
+    stripe_sub_id: Optional[str] = None
+    current_period_end: Optional[datetime] = None
+    cancel_at_period_end: bool = False
+    features_json: dict = {}
+
+    @field_validator("features_json", mode="before")
+    @classmethod
+    def parse_features_json(cls, v):
+        if isinstance(v, str):
+            try:
+                return json.loads(v)
+            except Exception:
+                return {}
+        if isinstance(v, dict):
+            return v
+        return {}
+
+    @field_validator("current_period_end", mode="before")
+    @classmethod
+    def parse_period_end(cls, v):
+        if isinstance(v, datetime):
+            return v
+        if isinstance(v, str):
+            try:
+                return datetime.fromisoformat(v.replace("Z", "+00:00"))
+            except Exception:
+                return None
+        return None
 
 @router.get("/plans", response_model=List[PlanResponse])
 async def get_plans(db: AsyncSession = Depends(get_db)):
@@ -88,7 +131,7 @@ async def get_plans(db: AsyncSession = Depends(get_db)):
         return [PlanResponse(**item) for item in cached_data]
 
     try:
-        await ensure_billing_schema(db)
+        await ensure_billing_schema()
         res = await db.execute(select(Plan))
         plans = res.scalars().all()
 
@@ -178,6 +221,7 @@ async def get_plans(db: AsyncSession = Depends(get_db)):
                 seat_limit=p.seat_limit or 1,
                 stripe_price_id_monthly=p.stripe_price_id_monthly,
                 stripe_price_id_annual=p.stripe_price_id_annual,
+                trial_days=getattr(p, "trial_days", None),
                 features_json=p.features_json or {},
             )
         )
@@ -186,16 +230,173 @@ async def get_plans(db: AsyncSession = Depends(get_db)):
 
 @router.get("/subscription", response_model=SubscriptionResponse)
 async def get_subscription(
+    workspace_id: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
 ):
-    return SubscriptionResponse(
-        plan_name="Growth Pro",
-        status="active",
-        messages_used=1420,
-        messages_limit=10000,
-        seat_limit=10,
-    )
+    try:
+        await ensure_billing_schema()
+
+        target_workspace_id = workspace_id or x_workspace_id
+        mem = None
+        if target_workspace_id and target_workspace_id not in ["undefined", "null"]:
+            mem_res = await db.execute(
+                select(TeamMember).where(
+                    TeamMember.workspace_id == target_workspace_id,
+                    TeamMember.user_id == current_user.id,
+                )
+            )
+            mem = mem_res.scalars().first()
+
+        if not mem:
+            mem_res = await db.execute(
+                select(TeamMember)
+                .where(TeamMember.user_id == current_user.id)
+                .order_by(TeamMember.joined_at.asc())
+            )
+            mem = mem_res.scalars().first()
+            if mem:
+                target_workspace_id = mem.workspace_id
+            else:
+                target_workspace_id = target_workspace_id or "default_workspace"
+
+        ws_res = await db.execute(select(Workspace).where(Workspace.id == target_workspace_id))
+        workspace = ws_res.scalars().first()
+
+        sub_res = await db.execute(
+            select(Subscription).where(Subscription.workspace_id == target_workspace_id)
+        )
+        sub = sub_res.scalars().first()
+
+        plan = None
+        plan_id = (sub.plan_id if sub else None) or (workspace.plan_id if workspace else None)
+        if plan_id:
+            p_res = await db.execute(
+                select(Plan).where((Plan.id == plan_id) | (Plan.name == plan_id))
+            )
+            plan = p_res.scalars().first()
+
+        if not plan:
+            p_res = await db.execute(select(Plan).where(Plan.name == "Free Trial"))
+            plan = p_res.scalars().first()
+
+        if not plan:
+            from apps.api.src.seed_plans import seed_plans
+            await seed_plans()
+            p_res = await db.execute(select(Plan).where(Plan.name == "Free Trial"))
+            plan = p_res.scalars().first()
+
+        plan_id_str = getattr(plan, "id", "plan_free_trial") if plan else "plan_free_trial"
+        plan_name_str = getattr(plan, "name", "Free Trial") if plan else "Free Trial"
+        msg_limit = getattr(plan, "message_limit", 100) if (plan and getattr(plan, "message_limit", None) is not None) else 100
+        s_limit = getattr(plan, "seat_limit", 1) if (plan and getattr(plan, "seat_limit", None) is not None) else 1
+        p_m_cents = (getattr(plan, "price_monthly_cents", 0) or 0) if plan else 0
+        p_a_cents = (getattr(plan, "price_annual_cents", 0) or 0) if plan else 0
+        feat_json = getattr(plan, "features_json", {}) if (plan and getattr(plan, "features_json", None)) else {}
+
+        m_display = f"${p_m_cents / 100:.0f}" if p_m_cents > 0 else "$0"
+        a_display = f"${p_a_cents / 100:.0f}" if p_a_cents > 0 else "$0"
+
+        now = utc_now()
+        period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        p_end_dt = None
+
+        if sub and getattr(sub, "current_period_end", None):
+            raw_p_end = sub.current_period_end
+            if isinstance(raw_p_end, datetime):
+                p_end_dt = raw_p_end if raw_p_end.tzinfo else raw_p_end.replace(tzinfo=timezone.utc)
+            elif isinstance(raw_p_end, str):
+                try:
+                    p_end_dt = datetime.fromisoformat(raw_p_end.replace("Z", "+00:00"))
+                except Exception:
+                    p_end_dt = None
+            elif isinstance(raw_p_end, (int, float)):
+                try:
+                    p_end_dt = datetime.fromtimestamp(raw_p_end, tz=timezone.utc)
+                except Exception:
+                    p_end_dt = None
+
+        if p_end_dt:
+            period_start = p_end_dt - timedelta(days=30)
+        else:
+            p_end_dt = now + timedelta(days=14)
+
+        try:
+            msg_count_query = (
+                select(func.count(Message.id))
+                .join(Conversation, Message.conversation_id == Conversation.id)
+                .where(
+                    Conversation.workspace_id == target_workspace_id,
+                    Message.sender_type == "ai",
+                    Message.created_at >= period_start,
+                )
+            )
+            messages_used = (await db.execute(msg_count_query)).scalar() or 0
+        except Exception as count_err:
+            logger.warning(f"Error calculating message count: {count_err}")
+            messages_used = 0
+
+        try:
+            seats_count_query = (
+                select(func.count(TeamMember.id))
+                .where(TeamMember.workspace_id == target_workspace_id)
+            )
+            seats_used = (await db.execute(seats_count_query)).scalar() or 1
+        except Exception as count_err:
+            logger.warning(f"Error calculating seats count: {count_err}")
+            seats_used = 1
+
+        sub_status = getattr(sub, "status", None) or (getattr(workspace, "status", "trialing") if workspace else "trialing") or "trialing"
+        if not isinstance(sub_status, str):
+            sub_status = "trialing"
+
+        return SubscriptionResponse(
+            id=getattr(sub, "id", None) if sub else None,
+            workspace_id=target_workspace_id,
+            plan_id=plan_id_str,
+            plan_name=plan_name_str,
+            status=sub_status,
+            messages_used=messages_used,
+            messages_limit=msg_limit,
+            seats_used=seats_used,
+            seat_limit=s_limit,
+            price_monthly_cents=p_m_cents,
+            price_annual_cents=p_a_cents,
+            price_monthly_display=m_display,
+            price_annual_display=a_display,
+            stripe_customer_id=getattr(sub, "stripe_customer_id", None) if sub else None,
+            stripe_sub_id=getattr(sub, "stripe_sub_id", None) if sub else None,
+            current_period_end=p_end_dt,
+            cancel_at_period_end=False,
+            features_json=feat_json,
+        )
+    except HTTPException:
+        raise
+    except Exception as err:
+        logger.error(f"Error in get_subscription: {err}", exc_info=True)
+        now = utc_now()
+        safe_ws_id = str(workspace_id or x_workspace_id or "default_workspace")
+        return SubscriptionResponse(
+            id=None,
+            workspace_id=safe_ws_id,
+            plan_id="plan_free_trial",
+            plan_name="Free Trial",
+            status="active",
+            messages_used=0,
+            messages_limit=100,
+            seats_used=1,
+            seat_limit=1,
+            price_monthly_cents=0,
+            price_annual_cents=0,
+            price_monthly_display="$0",
+            price_annual_display="$0",
+            stripe_customer_id=None,
+            stripe_sub_id=None,
+            current_period_end=now + timedelta(days=14),
+            cancel_at_period_end=False,
+            features_json={"sources_limit": 2, "analytics": False},
+        )
 
 @router.post("/checkout")
 async def create_checkout_session(
@@ -206,7 +407,7 @@ async def create_checkout_session(
     try:
         await ensure_billing_schema(db)
 
-        # Verify owner role on workspace
+        # Verify owner/admin role on workspace
         await get_workspace_membership(payload.workspace_id, current_user, db)
         
         res_ws = await db.execute(select(Workspace).where(Workspace.id == payload.workspace_id))
@@ -226,7 +427,7 @@ async def create_checkout_session(
         if not plan:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan not found")
 
-        # Step 4: Short-circuit Free Trial plan directly without Stripe
+        # Short-circuit Free Trial plan directly without Stripe
         if plan.name == "Free Trial" or (plan.price_monthly_cents or 0) == 0:
             period_end = utc_now() + timedelta(days=plan.trial_days or 14)
             
@@ -292,7 +493,6 @@ async def create_checkout_session(
             session_url = f"{settings.FRONTEND_URL}/onboarding/subscription/success?session_id=cs_mock_{generate_uuid()[:8]}&workspace_id={workspace.id}&plan_id={plan.id}"
             return {"redirect": session_url}
 
-
         stripe.api_key = settings.STRIPE_SECRET_KEY
 
         if not customer_id:
@@ -306,7 +506,6 @@ async def create_checkout_session(
         price_cents = (plan.price_annual_cents if payload.billing_cycle == "annual" else plan.price_monthly_cents) or 2900
         interval = "year" if payload.billing_cycle == "annual" else "month"
 
-        # If a real Stripe price ID is provided (e.g. price_1P...), use it; otherwise generate inline price_data
         if stripe_price_id and stripe_price_id.startswith("price_1"):
             line_items = [{"price": stripe_price_id, "quantity": 1}]
         else:
@@ -328,7 +527,7 @@ async def create_checkout_session(
             payment_method_types=["card"],
             line_items=line_items,
             mode="subscription",
-            metadata={"workspace_id": workspace.id, "plan_id": plan.id},
+            metadata={"workspace_id": workspace.id, "plan_id": plan.id, "user_id": current_user.id},
             success_url=f"{settings.FRONTEND_URL}/onboarding/subscription/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{settings.FRONTEND_URL}/onboarding/subscription?canceled=1",
         )
@@ -338,7 +537,6 @@ async def create_checkout_session(
     except Exception as e:
         logger.error(f"Checkout Exception: {e}")
         await db.rollback()
-        # Activate workspace on fallback redirect so onboarding completes
         try:
             res_ws = await db.execute(select(Workspace).where(Workspace.id == payload.workspace_id))
             ws = res_ws.scalars().first()
@@ -352,33 +550,34 @@ async def create_checkout_session(
         session_url = f"{settings.FRONTEND_URL}/onboarding/subscription/success?session_id=cs_mock_{generate_uuid()[:8]}&workspace_id={payload.workspace_id}&plan_id={payload.plan_id}"
         return {"redirect": session_url}
 
-
 @router.get("/checkout-status")
 async def check_checkout_status(
     session_id: str,
     workspace_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    x_workspace_id: Optional[str] = Header(None, alias="X-Workspace-Id"),
 ):
+    target_workspace_id = workspace_id or x_workspace_id
+    if target_workspace_id and target_workspace_id not in ["undefined", "null"]:
+        await get_workspace_membership(target_workspace_id, current_user, db)
+
     is_mock = session_id.startswith("cs_mock_") or settings.STRIPE_SECRET_KEY.startswith("sk_test_mock") or not stripe
     
     if is_mock:
-        if workspace_id:
-            ws_res = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+        if target_workspace_id:
+            ws_res = await db.execute(select(Workspace).where(Workspace.id == target_workspace_id))
             ws = ws_res.scalars().first()
             if ws and ws.status in ["active", "trialing"]:
                 return {"status": "active", "is_mock": True}
-        
-        sub_res = await db.execute(select(Subscription).order_by(Subscription.id.desc()))
-        sub = sub_res.scalars().first()
-        if sub and sub.status in ["active", "trialing"]:
-            return {"status": "active", "is_mock": True}
         return {"status": "active", "is_mock": True}
 
     try:
         if stripe:
             session = await asyncio.to_thread(stripe.checkout.Session.retrieve, session_id)
-            ws_id = session.metadata.get("workspace_id") or workspace_id
+            ws_id = session.metadata.get("workspace_id") or target_workspace_id
             if ws_id:
+                await get_workspace_membership(ws_id, current_user, db)
                 sub_res = await db.execute(select(Subscription).where(Subscription.workspace_id == ws_id))
                 sub = sub_res.scalars().first()
                 if sub and sub.status in ["active", "trialing"]:
@@ -415,7 +614,7 @@ async def stripe_webhook(
     if not event_id:
         raise HTTPException(status_code=400, detail="Missing event ID")
 
-    # Step 5: IDEMPOTENCY CHECK
+    # Single Transaction Idempotency Check
     res_ev = await db.execute(
         select(ProcessedStripeEvent).where(ProcessedStripeEvent.event_id == event_id)
     )
@@ -459,6 +658,57 @@ async def stripe_webhook(
                 ws.status = "active"
                 ws.plan_id = plan_id
 
+    elif event_type in ["customer.subscription.created", "customer.subscription.updated"]:
+        sub_obj = event.get("data", {}).get("object", {})
+        sub_id = sub_obj.get("id")
+        customer_id = sub_obj.get("customer")
+        status_val = sub_obj.get("status")
+        current_period_end_ts = sub_obj.get("current_period_end")
+        metadata = sub_obj.get("metadata", {})
+        ws_id = metadata.get("workspace_id")
+
+        items = sub_obj.get("items", {}).get("data", [])
+        price_id = items[0].get("price", {}).get("id") if items else None
+
+        period_end_dt = datetime.fromtimestamp(current_period_end_ts, tz=timezone.utc) if current_period_end_ts else None
+
+        sub = None
+        if sub_id:
+            sub_res = await db.execute(select(Subscription).where(Subscription.stripe_sub_id == sub_id))
+            sub = sub_res.scalars().first()
+        if not sub and customer_id:
+            sub_res = await db.execute(select(Subscription).where(Subscription.stripe_customer_id == customer_id))
+            sub = sub_res.scalars().first()
+        if not sub and ws_id:
+            sub_res = await db.execute(select(Subscription).where(Subscription.workspace_id == ws_id))
+            sub = sub_res.scalars().first()
+
+        plan_id = None
+        if price_id:
+            plan_res = await db.execute(
+                select(Plan).where(
+                    (Plan.stripe_price_id_monthly == price_id) | (Plan.stripe_price_id_annual == price_id)
+                )
+            )
+            found_plan = plan_res.scalars().first()
+            if found_plan:
+                plan_id = found_plan.id
+
+        if sub:
+            if status_val:
+                sub.status = status_val
+            if period_end_dt:
+                sub.current_period_end = period_end_dt
+            if plan_id:
+                sub.plan_id = plan_id
+            
+            ws_res = await db.execute(select(Workspace).where(Workspace.id == sub.workspace_id))
+            ws = ws_res.scalars().first()
+            if ws:
+                ws.status = status_val or ws.status
+                if plan_id:
+                    ws.plan_id = plan_id
+
     elif event_type == "invoice.paid":
         inv_obj = event.get("data", {}).get("object", {})
         customer_id = inv_obj.get("customer")
@@ -467,7 +717,12 @@ async def stripe_webhook(
             sub_res = await db.execute(select(Subscription).where(Subscription.stripe_customer_id == customer_id))
             sub = sub_res.scalars().first()
             if sub:
+                sub.status = "active"
                 sub.current_period_end = datetime.fromtimestamp(period_end_ts, tz=timezone.utc)
+                ws_res = await db.execute(select(Workspace).where(Workspace.id == sub.workspace_id))
+                ws = ws_res.scalars().first()
+                if ws:
+                    ws.status = "active"
 
     elif event_type == "invoice.payment_failed":
         inv_obj = event.get("data", {}).get("object", {})
@@ -495,9 +750,10 @@ async def stripe_webhook(
                 if ws:
                     ws.status = "canceled"
 
-    # Insert event_id into processed_stripe_events in SAME transaction
+    # Save event_id in SAME transaction
     processed_record = ProcessedStripeEvent(event_id=event_id)
     db.add(processed_record)
     await db.commit()
 
     return {"status": "success"}
+

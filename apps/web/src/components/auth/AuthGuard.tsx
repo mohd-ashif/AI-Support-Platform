@@ -110,16 +110,17 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       }
 
       const status = activeWs.status;
+      const role = activeWs.role;
 
-      // 3. Active / Trialing / Past Due workspaces
-      if (status === "active" || status === "trialing" || status === "past_due") {
-        if (isAuthRoute || isOnboardingRoute) {
+      // Non-owner team members (agents, admins) bypass owner onboarding flow
+      if (role === "agent" || role === "admin" || status === "active" || status === "trialing" || status === "past_due") {
+        if (isAuthRoute || (isOnboardingRoute && role !== "owner")) {
           router.replace("/dashboard");
         }
         return;
       }
 
-      // 4. Onboarding Status Handling
+      // 4. Owner Onboarding Status Handling
       if (status === "onboarding") {
         if (isDashboardRoute) {
           router.replace("/onboarding/subscription");

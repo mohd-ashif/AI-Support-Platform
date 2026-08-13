@@ -33,9 +33,23 @@ async def get_user_workspaces(db: AsyncSession, user_id: str) -> List[WorkspaceM
     return [WorkspaceMemberInfo(workspace_id=m.workspace_id, role=m.role) for m in memberships]
 
 async def register_user(db: AsyncSession, email: str, password: str, name: str) -> User:
+    from apps.api.src.models.core import Invite
     norm_email = email.strip().lower()
     existing = await get_user_by_email(db, norm_email)
     if existing:
+        res_inv = await db.execute(select(Invite).where(Invite.email == norm_email, Invite.status == "pending"))
+        pending_invite = res_inv.scalars().first()
+        res_mem = await db.execute(select(TeamMember).where(TeamMember.user_id == existing.id))
+        memberships = res_mem.scalars().all()
+
+        if pending_invite or len(memberships) == 0:
+            existing.password_hash = hash_password(password)
+            if name:
+                existing.name = name.strip()
+            await db.commit()
+            await db.refresh(existing)
+            return existing
+
         if existing.password_hash:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

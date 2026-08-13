@@ -61,21 +61,34 @@ def format_dt(dt) -> str:
         return dt.isoformat()
     return str(dt)
 
-@router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit_register)])
+@router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(rate_limit_register)])
 async def register(
     data: UserRegister,
+    request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ):
     user = await auth_service.register_user(
         db, email=data.email, password=data.password, name=data.name
     )
-    return UserResponse(
+    access_token = create_access_token({"sub": user.id, "email": user.email})
+    user_agent = request.headers.get("user-agent")
+    client_ip = request.client.host if request.client else None
+    
+    refresh_token = await auth_service.create_and_store_refresh_token(
+        db, user.id, user_agent=user_agent, ip_address=client_ip
+    )
+    set_refresh_cookie(response, refresh_token)
+
+    workspaces = await auth_service.get_user_workspaces(db, user.id)
+    user_resp = UserResponse(
         id=user.id,
         email=user.email,
         name=user.name,
         avatar_url=user.avatar_url,
         created_at=format_dt(user.created_at),
     )
+    return TokenResponse(access_token=access_token, user=user_resp, workspaces=workspaces)
 
 @router.post("/login", response_model=TokenResponse, dependencies=[Depends(rate_limit_login)])
 async def login(

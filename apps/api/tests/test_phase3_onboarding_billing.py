@@ -260,3 +260,52 @@ async def test_11_onboarding_status_after_adding_source(async_client: AsyncClien
     assert data["steps"][0]["completed"] is True
     assert data["completed_count"] == 1
     assert data["percent"] == 20
+
+@pytest.mark.asyncio
+async def test_12_get_subscription_dynamic_data(async_client: AsyncClient, auth_headers: dict):
+    headers = {"Authorization": auth_headers["Authorization"]}
+    ws_res = await async_client.get("/workspaces", headers=headers)
+    ws_id = ws_res.json()[0]["id"]
+
+    headers_with_ws = {**headers, "X-Workspace-Id": ws_id}
+    response = await async_client.get("/billing/subscription", headers=headers_with_ws)
+    assert response.status_code == 200
+    data = response.json()
+
+    assert "plan_name" in data
+    assert "messages_used" in data
+    assert "seats_used" in data
+    assert data["workspace_id"] == ws_id
+    assert isinstance(data["messages_used"], int)
+    assert isinstance(data["seats_used"], int)
+
+@pytest.mark.asyncio
+async def test_13_webhook_subscription_updated(async_client: AsyncClient, auth_headers: dict):
+    ws_res = await async_client.get("/workspaces", headers={"Authorization": auth_headers["Authorization"]})
+    ws_id = ws_res.json()[0]["id"]
+
+    event_payload = {
+        "id": "evt_test_updated_303",
+        "type": "customer.subscription.updated",
+        "data": {
+            "object": {
+                "id": "sub_test_456",
+                "customer": "cus_test_123",
+                "status": "active",
+                "current_period_end": 1770000000,
+                "metadata": {
+                    "workspace_id": ws_id,
+                },
+            }
+        },
+    }
+
+    response = await async_client.post("/billing/webhook", json=event_payload)
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+    async with AsyncSessionLocal() as db:
+        sub = (await db.execute(select(Subscription).where(Subscription.workspace_id == ws_id))).scalars().first()
+        assert sub is not None
+        assert sub.status == "active"
+

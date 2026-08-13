@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { apiFetch, getMemoryAccessToken } from "@/lib/api";
-import { useDispatch } from "react-redux";
-import { setAuth } from "@/store/slices/authSlice";
+import { apiFetch, getMemoryAccessToken, setMemoryWorkspaceId } from "@/lib/api";
+import { useSelector, useDispatch } from "react-redux";
+import { RootState } from "@/store";
+import { setAuth, setSelectedWorkspace } from "@/store/slices/authSlice";
 import { Shield, CheckCircle2, AlertCircle, Loader2, ArrowRight, Building2, UserCheck } from "lucide-react";
 
 interface InvitePageProps {
@@ -15,6 +16,9 @@ export default function InviteAcceptancePage({ params }: InvitePageProps) {
   const inviteToken = params?.token;
   const router = useRouter();
   const dispatch = useDispatch();
+
+  const { isAuthenticated, accessToken: reduxToken } = useSelector((state: RootState) => state.auth);
+  const token = reduxToken || getMemoryAccessToken();
 
   const [details, setDetails] = useState<{
     email: string;
@@ -49,6 +53,12 @@ export default function InviteAcceptancePage({ params }: InvitePageProps) {
     }
   };
 
+  useEffect(() => {
+    if (details?.valid && token && !accepting && !success && !error) {
+      handleAcceptInvite();
+    }
+  }, [details, token]);
+
   const handleAcceptInvite = async () => {
     setAccepting(true);
     setError(null);
@@ -68,14 +78,24 @@ export default function InviteAcceptancePage({ params }: InvitePageProps) {
 
       const userRes = await apiFetch("/auth/me").catch(() => null);
       const workspacesRes = await apiFetch("/workspaces").catch(() => []);
-      if (userRes && userAuthToken) {
+      const currentToken = getMemoryAccessToken();
+      if (userRes && currentToken) {
         dispatch(
           setAuth({
             user: userRes,
-            accessToken: userAuthToken,
+            accessToken: currentToken,
             workspaces: workspacesRes || [],
           })
         );
+        if (res?.workspace_id && Array.isArray(workspacesRes)) {
+          const joinedWs = workspacesRes.find(
+            (w: any) => (w.id || w.workspace_id) === res.workspace_id
+          );
+          if (joinedWs) {
+            dispatch(setSelectedWorkspace(joinedWs));
+            setMemoryWorkspaceId(joinedWs.id || joinedWs.workspace_id);
+          }
+        }
       }
 
       setTimeout(() => {
@@ -108,6 +128,25 @@ export default function InviteAcceptancePage({ params }: InvitePageProps) {
           <div className="py-12 text-center text-xs text-neutral-400 space-y-3">
             <Loader2 className="h-6 w-6 animate-spin text-[#D4AF37] mx-auto" />
             <p>Validating invitation token...</p>
+          </div>
+        ) : details?.status === "accepted" ? (
+          <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-6 text-center space-y-4 text-emerald-400">
+            <CheckCircle2 className="h-10 w-10 text-emerald-400 mx-auto" />
+            <div>
+              <h3 className="font-extrabold text-base text-white">Invitation Already Accepted</h3>
+              <p className="text-xs text-neutral-400 mt-1">
+                You are an active <span className="text-emerald-400 font-bold uppercase">{details.role}</span> in{" "}
+                <strong className="text-white">{details.workspace_name}</strong>.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => router.push("/dashboard")}
+              className="w-full py-3 rounded-2xl bg-gradient-to-r from-[#D4AF37] via-[#F4D03F] to-[#FFEAA7] text-[#050505] text-xs font-extrabold hover:brightness-110 transition-all shadow-lg flex items-center justify-center space-x-2"
+            >
+              <span>Go to Workspace Dashboard</span>
+              <ArrowRight className="h-4 w-4 text-[#050505]" />
+            </button>
           </div>
         ) : error && !details?.valid ? (
           <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-5 text-center space-y-4 text-xs text-red-400">
@@ -168,7 +207,7 @@ export default function InviteAcceptancePage({ params }: InvitePageProps) {
               </div>
             )}
 
-            {getMemoryAccessToken() ? (
+            {token ? (
               <button
                 type="button"
                 disabled={accepting}

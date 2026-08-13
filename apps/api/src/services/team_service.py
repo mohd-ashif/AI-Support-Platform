@@ -3,8 +3,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from fastapi import HTTPException, status
 
-from apps.api.src.models.core import User, TeamMember, Workspace
+from apps.api.src.models.core import User, TeamMember, Workspace, Plan, Subscription
 from apps.api.src.utils.security import hash_password
+from sqlalchemy import func
 
 async def get_team_members(db: AsyncSession, workspace_id: str) -> List[dict]:
     result = await db.execute(
@@ -34,7 +35,34 @@ async def invite_team_member(
     role: str,
 ) -> dict:
     norm_email = email.strip().lower()
-    
+
+    # Enforce Seat Quota Limit
+    seats_count_res = await db.execute(
+        select(func.count(TeamMember.id)).where(TeamMember.workspace_id == workspace_id)
+    )
+    current_seats = seats_count_res.scalar() or 0
+
+    sub_res = await db.execute(
+        select(Subscription).where(Subscription.workspace_id == workspace_id)
+    )
+    sub = sub_res.scalars().first()
+
+    ws_res = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+    ws = ws_res.scalars().first()
+
+    plan_id = (sub.plan_id if sub else None) or (ws.plan_id if ws else None)
+    plan = None
+    if plan_id:
+        p_res = await db.execute(select(Plan).where((Plan.id == plan_id) | (Plan.name == plan_id)))
+        plan = p_res.scalars().first()
+
+    seat_limit = plan.seat_limit if (plan and plan.seat_limit is not None) else 3
+    if seat_limit != -1 and current_seats >= seat_limit:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Seat limit reached ({current_seats}/{seat_limit}). Upgrade your subscription to add more team members.",
+        )
+
     result = await db.execute(select(User).where(User.email == norm_email))
     user = result.scalars().first()
     if not user:

@@ -155,20 +155,45 @@ async def get_invite_details(
     token: str,
     db: AsyncSession = Depends(get_db),
 ):
+    from apps.api.src.models.core import Business
     res_inv = await db.execute(select(Invite).where(Invite.token == token))
     invite = res_inv.scalars().first()
-    if not invite or invite.status != "pending":
-        return InviteDetailsResponse(email="", workspace_name="", role="", valid=False)
+    if not invite:
+        return InviteDetailsResponse(email="", workspace_name="", role="", valid=False, status="invalid")
 
-    is_valid = invite.expires_at > utc_now()
     res_ws = await db.execute(select(Workspace).where(Workspace.id == invite.workspace_id))
     ws = res_ws.scalars().first()
 
+    ws_name = "SupportAI Workspace"
+    if ws:
+        res_biz = await db.execute(select(Business).where(Business.id == ws.business_id))
+        biz = res_biz.scalars().first()
+        if biz and biz.name and biz.name != ws.id:
+            ws_name = biz.name
+        else:
+            res_widget = await db.execute(select(WidgetConfig).where(WidgetConfig.workspace_id == ws.id))
+            widget = res_widget.scalars().first()
+            if widget and widget.brand_name and widget.brand_name != ws.id:
+                ws_name = widget.brand_name
+            else:
+                ws_name = f"SupportAI Workspace ({ws.id[:8]})"
+
+    if invite.status == "accepted":
+        return InviteDetailsResponse(
+            email=invite.email,
+            workspace_name=ws_name,
+            role=invite.role,
+            valid=True,
+            status="accepted",
+        )
+
+    is_valid = (invite.status == "pending") and (invite.expires_at > utc_now())
     return InviteDetailsResponse(
         email=invite.email,
-        workspace_name=ws.id if ws else "Workspace",
+        workspace_name=ws_name,
         role=invite.role,
         valid=is_valid,
+        status=invite.status,
     )
 
 @router.post("/invites/{token}/accept")
@@ -188,15 +213,27 @@ async def accept_invite(
             detail=f"Invite email ({invite.email}) does not match your logged-in account ({current_user.email}).",
         )
 
-    # Add team member
-    new_member = TeamMember(
-        workspace_id=invite.workspace_id,
-        user_id=current_user.id,
-        role=invite.role,
-        joined_at=utc_now(),
+    res_mem = await db.execute(
+        select(TeamMember).where(
+            TeamMember.workspace_id == invite.workspace_id,
+            TeamMember.user_id == current_user.id,
+        )
     )
+    mem = res_mem.scalars().first()
+    if not mem:
+        mem = TeamMember(
+            workspace_id=invite.workspace_id,
+            user_id=current_user.id,
+            role=invite.role,
+            joined_at=utc_now(),
+        )
+        db.add(mem)
+    else:
+        mem.role = invite.role
+        if not mem.joined_at:
+            mem.joined_at = utc_now()
+
     invite.status = "accepted"
-    db.add(new_member)
     await db.commit()
 
     return {"status": "ok", "workspace_id": invite.workspace_id}

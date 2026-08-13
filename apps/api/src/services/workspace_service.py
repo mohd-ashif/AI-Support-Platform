@@ -224,7 +224,7 @@ async def get_user_workspaces(db: AsyncSession, user_id: str) -> List[dict]:
     result = await db.execute(
         select(TeamMember, Workspace, Business, WidgetConfig)
         .join(Workspace, TeamMember.workspace_id == Workspace.id)
-        .join(Business, Workspace.business_id == Business.id)
+        .outerjoin(Business, Workspace.business_id == Business.id)
         .outerjoin(WidgetConfig, WidgetConfig.workspace_id == Workspace.id)
         .where(TeamMember.user_id == user_id)
     )
@@ -239,20 +239,29 @@ async def get_user_workspaces(db: AsyncSession, user_id: str) -> List[dict]:
             ws.status = sub.status
             await db.commit()
 
+        biz_data = {
+            "id": biz.id,
+            "name": biz.name,
+            "website_url": biz.website_url,
+            "industry": biz.industry,
+            "logo_url": biz.logo_url,
+            "created_at": biz.created_at.isoformat() if (biz and biz.created_at) else "",
+        } if biz else {
+            "id": ws.business_id or ws.id,
+            "name": (widget.brand_name if (widget and widget.brand_name) else "SupportAI Workspace"),
+            "website_url": "",
+            "industry": "",
+            "logo_url": None,
+            "created_at": ws.created_at.isoformat() if ws.created_at else "",
+        }
+
         workspaces_data.append({
             "id": ws.id,
-            "business_id": ws.business_id,
+            "business_id": ws.business_id or ws.id,
             "workspace_uuid": ws.workspace_uuid,
             "role": member.role,
             "status": ws.status,
-            "business": {
-                "id": biz.id,
-                "name": biz.name,
-                "website_url": biz.website_url,
-                "industry": biz.industry,
-                "logo_url": biz.logo_url,
-                "created_at": biz.created_at.isoformat() if biz.created_at else "",
-            },
+            "business": biz_data,
             "widget_config": {
                 "id": widget.id,
                 "brand_name": widget.brand_name,
