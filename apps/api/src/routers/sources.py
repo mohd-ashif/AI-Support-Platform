@@ -1,3 +1,4 @@
+import asyncio
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header, status
 from pydantic import BaseModel, HttpUrl
@@ -8,6 +9,14 @@ from apps.api.src.database.session import get_db
 from apps.api.src.dependencies.auth import get_current_user, get_current_workspace_member
 from apps.api.src.models.core import User, TeamMember, SourceWeb, SourceFile, KnowledgeChunk
 from apps.api.src.services import source_service
+from apps.api.src.services.cache_service import (
+    async_get_json,
+    async_set_json,
+    async_get_version,
+    async_increment_version,
+    build_cache_key,
+    CacheTTL,
+)
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
@@ -38,15 +47,14 @@ async def create_web_source(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
-    import asyncio
-    from apps.api.src.services.cache_service import invalidate_cache
-    invalidate_cache(f"supportai:cache:{member.workspace_id}:sources_web")
-
     source = await source_service.create_web_source_pending(
         db, workspace_id=member.workspace_id, url=payload.url
     )
 
-    # Always run in-process background task for immediate ingestion, fallback if Celery is not active
+    # Invalidate cache version AFTER DB commit in source_service
+    await async_increment_version(member.workspace_id, "sources:web")
+
+    # Background ingestion task
     asyncio.create_task(
         source_service.ingest_web_source_background(member.workspace_id, source.id, source.url)
     )
@@ -71,9 +79,10 @@ async def list_web_sources(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
-    from apps.api.src.services.cache_service import get_cache, set_cache
-    cache_key = f"supportai:cache:{member.workspace_id}:sources_web"
-    cached = get_cache(cache_key)
+    version = await async_get_version(member.workspace_id, "sources:web")
+    cache_key = build_cache_key(member.workspace_id, "sources:web", version=version)
+    
+    cached = await async_get_json(cache_key)
     if cached:
         return [WebSourceResponse(**item) for item in cached]
 
@@ -91,7 +100,7 @@ async def list_web_sources(
         )
         for s in sources
     ]
-    set_cache(cache_key, [item.model_dump() for item in resp], ttl_seconds=10)
+    await async_set_json(cache_key, [item.model_dump() for item in resp], ttl_seconds=CacheTTL.NORMAL_LIST)
     return resp
 
 @router.delete("/web/{source_id}")
@@ -100,9 +109,6 @@ async def delete_web_source(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
-    from apps.api.src.services.cache_service import invalidate_cache
-    invalidate_cache(f"supportai:cache:{member.workspace_id}:sources_web")
-
     res = await db.execute(
         select(SourceWeb).where(SourceWeb.id == source_id, SourceWeb.workspace_id == member.workspace_id)
     )
@@ -116,6 +122,10 @@ async def delete_web_source(
     )
     await db.delete(source)
     await db.commit()
+
+    # Invalidate cache version AFTER DB commit
+    await async_increment_version(member.workspace_id, "sources:web")
+
     return {"message": "Web source and associated vectors deleted successfully"}
 
 @router.post("/web/{source_id}/recrawl", response_model=WebSourceResponse)
@@ -124,10 +134,6 @@ async def recrawl_web_source(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
-    import asyncio
-    from apps.api.src.services.cache_service import invalidate_cache
-    invalidate_cache(f"supportai:cache:{member.workspace_id}:sources_web")
-
     res = await db.execute(
         select(SourceWeb).where(SourceWeb.id == source_id, SourceWeb.workspace_id == member.workspace_id)
     )
@@ -137,6 +143,9 @@ async def recrawl_web_source(
 
     source.status = "pending"
     await db.commit()
+
+    # Invalidate cache version AFTER DB commit
+    await async_increment_version(member.workspace_id, "sources:web")
 
     asyncio.create_task(
         source_service.ingest_web_source_background(member.workspace_id, source.id, source.url)
@@ -158,15 +167,14 @@ async def create_file_source(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
-    import asyncio
-    from apps.api.src.services.cache_service import invalidate_cache
-    invalidate_cache(f"supportai:cache:{member.workspace_id}:sources_files")
-
     content_bytes = await file.read()
     try:
         source, extracted_text = await source_service.create_file_source_pending(
             db, workspace_id=member.workspace_id, filename=file.filename, content_bytes=content_bytes
         )
+        # Invalidate cache version AFTER DB commit
+        await async_increment_version(member.workspace_id, "sources:files")
+
         asyncio.create_task(
             source_service.ingest_file_source_background(member.workspace_id, source.id, extracted_text)
         )
@@ -195,9 +203,10 @@ async def list_file_sources(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
-    from apps.api.src.services.cache_service import get_cache, set_cache
-    cache_key = f"supportai:cache:{member.workspace_id}:sources_files"
-    cached = get_cache(cache_key)
+    version = await async_get_version(member.workspace_id, "sources:files")
+    cache_key = build_cache_key(member.workspace_id, "sources:files", version=version)
+    
+    cached = await async_get_json(cache_key)
     if cached:
         return [FileSourceResponse(**item) for item in cached]
 
@@ -215,7 +224,7 @@ async def list_file_sources(
         )
         for s in sources
     ]
-    set_cache(cache_key, [item.model_dump() for item in resp], ttl_seconds=10)
+    await async_set_json(cache_key, [item.model_dump() for item in resp], ttl_seconds=CacheTTL.NORMAL_LIST)
     return resp
 
 @router.delete("/files/{source_id}")
@@ -224,9 +233,6 @@ async def delete_file_source(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
-    from apps.api.src.services.cache_service import invalidate_cache
-    invalidate_cache(f"supportai:cache:{member.workspace_id}:sources_files")
-
     res = await db.execute(
         select(SourceFile).where(SourceFile.id == source_id, SourceFile.workspace_id == member.workspace_id)
     )
@@ -239,4 +245,8 @@ async def delete_file_source(
     )
     await db.delete(source)
     await db.commit()
+
+    # Invalidate cache version AFTER DB commit
+    await async_increment_version(member.workspace_id, "sources:files")
+
     return {"message": "File source and associated vectors deleted successfully"}

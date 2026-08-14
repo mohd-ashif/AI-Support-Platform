@@ -361,6 +361,8 @@ async def create_api_key(
     member: TeamMember = Depends(require_role(["owner", "admin"])),
     db: AsyncSession = Depends(get_db),
 ):
+    from apps.api.src.services.cache_service import async_increment_version
+
     raw_secret = secrets.token_urlsafe(32)
     key_prefix = f"sk_test_{raw_secret[:8]}"
     raw_key = f"{key_prefix}_{raw_secret}"
@@ -376,6 +378,9 @@ async def create_api_key(
     db.add(key_row)
     await db.commit()
 
+    # Invalidate cache version AFTER DB commit
+    await async_increment_version(member.workspace_id, "api:keys")
+
     return APIKeyCreateResponse(
         id=key_row.id,
         label=key_row.label,
@@ -388,11 +393,26 @@ async def list_api_keys(
     member: TeamMember = Depends(require_role(["owner", "admin"])),
     db: AsyncSession = Depends(get_db),
 ):
+    from apps.api.src.services.cache_service import (
+        async_get_json,
+        async_set_json,
+        async_get_version,
+        build_cache_key,
+        CacheTTL,
+    )
+
+    version = await async_get_version(member.workspace_id, "api:keys")
+    cache_key = build_cache_key(member.workspace_id, "api:keys", version=version)
+
+    cached = await async_get_json(cache_key)
+    if cached:
+        return [APIKeyItem(**item) for item in cached]
+
     res = await db.execute(
         select(APIKey).where(APIKey.workspace_id == member.workspace_id)
     )
     keys = res.scalars().all()
-    return [
+    out = [
         APIKeyItem(
             id=k.id,
             label=k.label,
@@ -402,6 +422,8 @@ async def list_api_keys(
         )
         for k in keys
     ]
+    await async_set_json(cache_key, [item.model_dump() for item in out], ttl_seconds=CacheTTL.NORMAL_LIST)
+    return out
 
 @router.delete("/api-keys/{key_id}")
 async def revoke_api_key(
@@ -409,6 +431,8 @@ async def revoke_api_key(
     member: TeamMember = Depends(require_role(["owner", "admin"])),
     db: AsyncSession = Depends(get_db),
 ):
+    from apps.api.src.services.cache_service import async_increment_version
+
     res = await db.execute(
         select(APIKey).where(
             APIKey.id == key_id,
@@ -421,6 +445,10 @@ async def revoke_api_key(
 
     key_row.revoked_at = utc_now()
     await db.commit()
+
+    # Invalidate cache version AFTER DB commit
+    await async_increment_version(member.workspace_id, "api:keys")
+
     return {"status": "ok"}
 
 # --- STEP 5: WEBHOOKS (SECOND SSRF Surface) ---

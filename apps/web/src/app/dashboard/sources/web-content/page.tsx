@@ -1,48 +1,65 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
-import { useSelector } from "react-redux";
+import React, { useState, useEffect } from "react";
+import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "@/store";
 import { apiFetch } from "@/lib/api";
+import {
+  setWebSourcesLoading,
+  setWebSourcesSuccess,
+  setWebSourcesError,
+  addWebSource,
+  removeWebSource,
+  updateWebSource,
+} from "@/store/slices/sourcesSlice";
 import { Globe, Plus, RefreshCw, Trash2, AlertTriangle, CheckCircle2, Clock, XCircle, Loader2 } from "lucide-react";
 
 export default function WebContentSourcesPage() {
+  const dispatch = useDispatch();
   const { selectedWorkspace, workspaces } = useSelector((state: RootState) => state.auth);
+  const webState = useSelector((state: RootState) => state.sources.web);
   const activeWs = selectedWorkspace || (workspaces && workspaces.length > 0 ? workspaces[0] : null);
 
-  const [sources, setSources] = useState<any[]>([]);
   const [url, setUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
-  const fetchSources = async () => {
+  const fetchSources = async (force: boolean = false) => {
     if (!activeWs?.id) return;
+    // Skip refetch on mount if Redux already contains valid success data and force is false
+    if (!force && webState.status === "success" && webState.items.length > 0) {
+      return;
+    }
+
     try {
+      if (webState.status === "idle") {
+        dispatch(setWebSourcesLoading());
+      }
       const data = await apiFetch("/sources/web", {
         headers: { "X-Workspace-Id": activeWs.id },
       });
-      setSources(data || []);
+      dispatch(setWebSourcesSuccess({ items: data || [] }));
     } catch (err: any) {
-      // Ignore background poll errors
+      dispatch(setWebSourcesError(err.message || "Failed to load web sources"));
     }
   };
 
   useEffect(() => {
-    fetchSources();
+    fetchSources(false);
   }, [activeWs?.id]);
 
   // Polling: every 3s ONLY while in-progress rows exist
   useEffect(() => {
-    const hasInProgress = sources.some((s) => s.status === "pending" || s.status === "crawling");
+    const hasInProgress = webState.items.some((s) => s.status === "pending" || s.status === "crawling");
     if (!hasInProgress) return;
 
     const timer = setInterval(() => {
-      fetchSources();
+      fetchSources(true);
     }, 3000);
 
     return () => clearInterval(timer);
-  }, [sources, activeWs?.id]);
+  }, [webState.items, activeWs?.id]);
 
   const handleAddWebsite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,13 +68,14 @@ export default function WebContentSourcesPage() {
 
     setSubmitting(true);
     try {
-      await apiFetch("/sources/web", {
+      const createdSource = await apiFetch("/sources/web", {
         method: "POST",
         headers: { "X-Workspace-Id": activeWs?.id },
         body: JSON.stringify({ url: url.trim() }),
       });
       setUrl("");
-      await fetchSources();
+      // Optimistically update Redux state directly without full refetch
+      dispatch(addWebSource(createdSource));
     } catch (err: any) {
       setError(err.message || "Failed to add website source.");
     } finally {
@@ -67,11 +85,11 @@ export default function WebContentSourcesPage() {
 
   const handleRecrawl = async (sourceId: string) => {
     try {
-      await apiFetch(`/sources/web/${sourceId}/recrawl`, {
+      const updated = await apiFetch(`/sources/web/${sourceId}/recrawl`, {
         method: "POST",
         headers: { "X-Workspace-Id": activeWs?.id },
       });
-      await fetchSources();
+      dispatch(updateWebSource(updated));
     } catch (err: any) {
       setError(err.message || "Failed to trigger recrawl.");
     }
@@ -84,11 +102,14 @@ export default function WebContentSourcesPage() {
         headers: { "X-Workspace-Id": activeWs?.id },
       });
       setDeleteTargetId(null);
-      await fetchSources();
+      // Optimistically update Redux state directly without full refetch
+      dispatch(removeWebSource(sourceId));
     } catch (err: any) {
       setError(err.message || "Failed to delete web source.");
     }
   };
+
+  const sources = webState.items;
 
   return (
     <div className="p-8 space-[#050505] min-h-screen text-white space-y-8">
@@ -118,131 +139,132 @@ export default function WebContentSourcesPage() {
         <div className="flex space-x-3">
           <input
             type="text"
-            required
-            placeholder="https://docs.acme.com"
+            placeholder="https://docs.example.com"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            className="flex-1 px-4 py-2.5 rounded-xl bg-[#050505] border border-[#222222] focus:border-[#D4AF37] text-xs text-white placeholder-neutral-500 focus:outline-none"
+            className="flex-1 bg-[#1A1A1A] border border-[#333333] rounded-xl px-4 py-2.5 text-sm text-white placeholder-neutral-500 focus:outline-none focus:border-[#D4AF37] transition-all"
           />
           <button
             type="submit"
-            disabled={submitting}
-            className="px-5 py-2.5 bg-[#D4AF37] text-black font-extrabold text-xs rounded-xl hover:brightness-110 transition-all flex items-center space-x-2 shrink-0"
+            disabled={submitting || !url.trim()}
+            className="px-5 py-2.5 bg-[#D4AF37] hover:bg-[#b89628] disabled:opacity-50 text-black font-semibold text-sm rounded-xl transition-all flex items-center space-x-2 shrink-0 shadow-lg shadow-[#D4AF37]/10"
           >
-            {submitting ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin text-black" />
-                <span>Crawling...</span>
-              </>
-            ) : (
-              <>
-                <Plus className="h-4 w-4 text-black" />
-                <span>Add Website</span>
-              </>
-            )}
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+            <span>{submitting ? "Submitting..." : "Add Website"}</span>
           </button>
         </div>
       </form>
 
-      {/* Sources Table */}
-      <div className="bg-[#111111] border border-[#222222] rounded-2xl overflow-hidden shadow-xl">
-        <table className="w-full text-left text-xs text-neutral-300">
-          <thead className="bg-[#161616] text-neutral-400 font-bold uppercase text-[10px] border-b border-[#222222]">
-            <tr>
-              <th className="p-4">Target Website URL</th>
-              <th className="p-4">Status</th>
-              <th className="p-4">Pages Crawled</th>
-              <th className="p-4">Last Crawled</th>
-              <th className="p-4 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#1F1F1F]">
-            {sources.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="p-8 text-center text-neutral-500">
-                  No website sources indexed yet. Enter a domain URL above to begin.
-                </td>
-              </tr>
-            ) : (
-              sources.map((src) => {
-                const isReady = src.status === "ready";
-                const isFailed = src.status === "failed";
-                const isPending = src.status === "pending" || src.status === "crawling";
+      {/* Sources List Table */}
+      <div className="bg-[#111111] border border-[#222222] rounded-2xl p-6 space-y-4 shadow-xl">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-bold text-neutral-200">Indexed Web Domains ({sources.length})</h3>
+          <button
+            onClick={() => fetchSources(true)}
+            className="p-2 text-neutral-400 hover:text-white rounded-lg hover:bg-white/5 transition-all"
+            title="Refresh List"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
+        </div>
 
-                return (
-                  <tr key={src.id} className="hover:bg-[#161616]/50 transition-colors">
-                    <td className="p-4 font-semibold text-white truncate max-w-xs">{src.url}</td>
-                    <td className="p-4">
-                      {isReady && (
-                        <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-bold text-[10px] flex items-center space-x-1.5 w-fit">
+        {webState.status === "loading" && sources.length === 0 ? (
+          <div className="py-12 text-center text-neutral-500 flex flex-col items-center justify-center space-y-2">
+            <Loader2 className="h-6 w-6 animate-spin text-[#D4AF37]" />
+            <p className="text-xs">Loading web sources from cache / API...</p>
+          </div>
+        ) : sources.length === 0 ? (
+          <div className="py-12 text-center text-neutral-500 space-y-2">
+            <Globe className="h-8 w-8 mx-auto text-neutral-600 stroke-[1.5]" />
+            <p className="text-xs">No website sources indexed yet. Add your documentation or homepage above.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-[#222222] text-neutral-400">
+                  <th className="pb-3 font-semibold">Target URL</th>
+                  <th className="pb-3 font-semibold">Status</th>
+                  <th className="pb-3 font-semibold">Pages Indexed</th>
+                  <th className="pb-3 font-semibold">Last Crawled</th>
+                  <th className="pb-3 font-semibold text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#1A1A1A]">
+                {sources.map((s) => (
+                  <tr key={s.id} className="hover:bg-white/[0.02] transition-colors">
+                    <td className="py-4 font-medium text-white max-w-xs truncate">{s.url}</td>
+                    <td className="py-4">
+                      {s.status === "completed" && (
+                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                           <CheckCircle2 className="h-3 w-3" />
-                          <span>Ready</span>
+                          <span>Active</span>
                         </span>
                       )}
-                      {isFailed && (
-                        <span className="px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 font-bold text-[10px] flex items-center space-x-1.5 w-fit" title={src.error_message}>
+                      {(s.status === "pending" || s.status === "crawling") && (
+                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                          <Clock className="h-3 w-3 animate-spin" />
+                          <span>{s.status === "pending" ? "Queued" : "Crawling..."}</span>
+                        </span>
+                      )}
+                      {s.status === "failed" && (
+                        <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] bg-red-500/10 text-red-400 border border-red-500/20" title={s.error_message || ""}>
                           <XCircle className="h-3 w-3" />
                           <span>Failed</span>
                         </span>
                       )}
-                      {isPending && (
-                        <span className="px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 font-bold text-[10px] flex items-center space-x-1.5 w-fit">
-                          <Clock className="h-3 w-3 animate-spin" />
-                          <span className="capitalize">{src.status}...</span>
-                        </span>
-                      )}
                     </td>
-                    <td className="p-4 font-mono">{src.page_count} pages</td>
-                    <td className="p-4 text-neutral-400">
-                      {src.last_crawled_at ? new Date(src.last_crawled_at).toLocaleDateString() : "Pending"}
+                    <td className="py-4 text-neutral-300">{s.page_count || 0} pages</td>
+                    <td className="py-4 text-neutral-400">
+                      {s.last_crawled_at ? new Date(s.last_crawled_at).toLocaleString() : "Never"}
                     </td>
-                    <td className="p-4 text-right space-x-2">
+                    <td className="py-4 text-right space-x-2">
                       <button
-                        onClick={() => handleRecrawl(src.id)}
-                        className="p-1.5 rounded-lg bg-[#1C1C1C] hover:bg-[#282828] text-neutral-300 transition-colors"
+                        onClick={() => handleRecrawl(s.id)}
+                        className="p-1.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
                         title="Recrawl Source"
                       >
                         <RefreshCw className="h-3.5 w-3.5" />
                       </button>
                       <button
-                        onClick={() => setDeleteTargetId(src.id)}
-                        className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
+                        onClick={() => setDeleteTargetId(s.id)}
+                        className="p-1.5 text-neutral-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all"
                         title="Delete Source"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </td>
                   </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Delete Confirmation Modal */}
       {deleteTargetId && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-[#111111] border border-[#222222] rounded-2xl p-6 max-w-sm w-full space-y-4 text-center">
-            <AlertTriangle className="h-8 w-8 text-red-400 mx-auto" />
-            <div className="space-y-1">
-              <h4 className="text-base font-extrabold text-white">Delete Website Source?</h4>
-              <p className="text-xs text-neutral-400">
-                This will permanently remove the web index and vector embeddings from your AI agent's knowledge base.
-              </p>
-            </div>
-            <div className="flex space-x-3 pt-2">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-[#111111] border border-[#222222] rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
+            <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+              <AlertTriangle className="h-4 w-4 text-red-500" />
+              <span>Delete Web Source</span>
+            </h3>
+            <p className="text-xs text-neutral-400">
+              Are you sure you want to delete this web source? All associate knowledge vectors will be permanently removed.
+            </p>
+            <div className="flex justify-end space-x-3 pt-2">
               <button
                 onClick={() => setDeleteTargetId(null)}
-                className="flex-1 py-2 rounded-xl bg-[#1C1C1C] text-neutral-300 font-bold text-xs hover:bg-[#252525]"
+                className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-xs font-semibold rounded-xl text-neutral-300 transition-all"
               >
                 Cancel
               </button>
               <button
                 onClick={() => handleDelete(deleteTargetId)}
-                className="flex-1 py-2 rounded-xl bg-red-500 text-white font-extrabold text-xs hover:bg-red-600"
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-xs font-semibold rounded-xl text-white transition-all shadow-lg shadow-red-600/20"
               >
-                Confirm Delete
+                Delete
               </button>
             </div>
           </div>

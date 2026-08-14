@@ -116,27 +116,26 @@ async def get_analytics_summary(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
+    from apps.api.src.services.cache_service import (
+        async_get_json,
+        async_set_json,
+        async_get_version,
+        build_cache_key,
+        CacheTTL,
+    )
+
     days = 7
     if range_str == "30d":
         days = 30
     elif range_str == "90d":
         days = 90
 
-    cache_key = f"analytics:summary:{member.workspace_id}:{range_str}"
+    version = await async_get_version(member.workspace_id, "analytics:summary")
+    cache_key = build_cache_key(member.workspace_id, "analytics:summary", version=version, filters={"range": range_str})
     
-    from apps.api.src.services.cache_service import get_cache, set_cache
-    cached_data = get_cache(cache_key)
+    cached_data = await async_get_json(cache_key)
     if cached_data:
         return AnalyticsSummaryResponse(**cached_data)
-
-    # Try Redis Cache
-    try:
-        if redis_client:
-            redis_data = await redis_client.get(cache_key)
-            if redis_data:
-                return AnalyticsSummaryResponse(**json.loads(redis_data))
-    except Exception as e:
-        logger.warning(f"Redis analytics cache read fallback: {e}")
 
     now_utc = utc_now().date()
     start_date = now_utc - timedelta(days=days - 1)
@@ -214,10 +213,6 @@ async def get_analytics_summary(
         top_questions=top_q_list,
     )
 
-    # Set short Redis cache (5 minutes)
-    try:
-        await redis_client.setex(cache_key, 300, response_payload.json())
-    except Exception as e:
-        logger.warning(f"Redis analytics cache write fallback: {e}")
+    await async_set_json(cache_key, response_payload.model_dump(), ttl_seconds=CacheTTL.ANALYTICS)
 
     return response_payload

@@ -124,9 +124,9 @@ class SubscriptionResponse(BaseModel):
 
 @router.get("/plans", response_model=List[PlanResponse])
 async def get_plans(db: AsyncSession = Depends(get_db)):
-    from apps.api.src.services.cache_service import get_cache, set_cache
-    cache_key = "supportai:cache:global:plans"
-    cached_data = get_cache(cache_key)
+    from apps.api.src.services.cache_service import async_get_json, async_set_json, CacheTTL
+    cache_key = "workspace:global:billing:plans:v1"
+    cached_data = await async_get_json(cache_key)
     if cached_data:
         return [PlanResponse(**item) for item in cached_data]
 
@@ -146,7 +146,7 @@ async def get_plans(db: AsyncSession = Depends(get_db)):
 
     if not plans:
         # Fallback static plan models if DB is uninitialized
-        return [
+        output = [
             PlanResponse(
                 id="plan_free_trial",
                 name="Free Trial",
@@ -204,6 +204,8 @@ async def get_plans(db: AsyncSession = Depends(get_db)):
                 features_json={"sources_limit": -1, "analytics": True, "api_access": True, "webhooks": True},
             ),
         ]
+        await async_set_json(cache_key, [item.model_dump() for item in output], ttl_seconds=CacheTTL.STATIC_REFERENCE)
+        return output
 
     output = []
     for p in plans:
@@ -225,7 +227,7 @@ async def get_plans(db: AsyncSession = Depends(get_db)):
                 features_json=p.features_json or {},
             )
         )
-    set_cache(cache_key, [item.model_dump() for item in output], ttl_seconds=3600)
+    await async_set_json(cache_key, [item.model_dump() for item in output], ttl_seconds=CacheTTL.STATIC_REFERENCE)
     return output
 
 @router.get("/subscription", response_model=SubscriptionResponse)

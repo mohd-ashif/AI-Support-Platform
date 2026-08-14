@@ -9,6 +9,14 @@ from sqlalchemy import select
 from apps.api.src.database.session import get_db
 from apps.api.src.dependencies.auth import get_current_user, get_current_workspace_member, require_role
 from apps.api.src.models.core import User, TeamMember, Workspace, WidgetConfig, utc_now
+from apps.api.src.services.cache_service import (
+    async_get_json,
+    async_set_json,
+    async_get_version,
+    async_increment_version,
+    build_cache_key,
+    CacheTTL,
+)
 
 logger = logging.getLogger("widget_router")
 
@@ -74,9 +82,10 @@ async def get_widget_config(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
-    from apps.api.src.services.cache_service import get_cache, set_cache
-    cache_key = f"supportai:cache:{member.workspace_id}:widget_config"
-    cached = get_cache(cache_key)
+    version = await async_get_version(member.workspace_id, "widget:config")
+    cache_key = build_cache_key(member.workspace_id, "widget:config", version=version)
+    
+    cached = await async_get_json(cache_key)
     if cached:
         return WidgetConfigResponse(**cached)
 
@@ -108,7 +117,7 @@ async def get_widget_config(
         content_cards_json=config.content_cards_json or [],
         updated_at=config.updated_at.isoformat() if config.updated_at else None,
     )
-    set_cache(cache_key, resp.model_dump(), ttl_seconds=60)
+    await async_set_json(cache_key, resp.model_dump(), ttl_seconds=CacheTTL.WIDGET_CONFIG)
     return resp
 
 @router.patch("/widget/config", response_model=WidgetConfigResponse)
@@ -117,10 +126,6 @@ async def update_widget_config(
     member: TeamMember = Depends(require_role(["owner", "admin"])),
     db: AsyncSession = Depends(get_db),
 ):
-    from apps.api.src.services.cache_service import invalidate_cache
-    cache_key = f"supportai:cache:{member.workspace_id}:widget_config"
-    invalidate_cache(cache_key)
-
     res = await db.execute(select(WidgetConfig).where(WidgetConfig.workspace_id == member.workspace_id))
     config = res.scalars().first()
     if not config:
@@ -148,6 +153,9 @@ async def update_widget_config(
     await db.commit()
     await db.refresh(config)
 
+    # Invalidate cache version AFTER DB commit
+    await async_increment_version(member.workspace_id, "widget:config")
+
     resp = WidgetConfigResponse(
         id=config.id,
         workspace_id=config.workspace_id,
@@ -161,7 +169,7 @@ async def update_widget_config(
     )
     return resp
 
-# STEP 1 & 2: Public Widget Config Endpoint for Third-Party Websites
+# Public Widget Config Endpoint for Third-Party Websites
 @router.get("/public/widget-config", response_model=WidgetConfigResponse)
 async def get_public_widget_config(
     workspace_id: str = Query(...),
@@ -175,10 +183,16 @@ async def get_public_widget_config(
     if not ws:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Public workspace not found")
 
+    version = await async_get_version(ws.id, "widget:config")
+    cache_key = build_cache_key(ws.id, "widget:config", version=version)
+    cached = await async_get_json(cache_key)
+    if cached:
+        return WidgetConfigResponse(**cached)
+
     res = await db.execute(select(WidgetConfig).where(WidgetConfig.workspace_id == ws.id))
     config = res.scalars().first()
     if not config:
-        return WidgetConfigResponse(
+        resp = WidgetConfigResponse(
             id="cfg_default",
             workspace_id=ws.id,
             brand_name=ws.name,
@@ -186,8 +200,10 @@ async def get_public_widget_config(
             greeting_message="",
             content_cards_json=[],
         )
+        await async_set_json(cache_key, resp.model_dump(), ttl_seconds=CacheTTL.WIDGET_CONFIG)
+        return resp
 
-    return WidgetConfigResponse(
+    resp = WidgetConfigResponse(
         id=config.id,
         workspace_id=config.workspace_id,
         brand_name=config.brand_name or ws.name,
@@ -198,3 +214,5 @@ async def get_public_widget_config(
         content_cards_json=config.content_cards_json or [],
         updated_at=config.updated_at.isoformat() if config.updated_at else None,
     )
+    await async_set_json(cache_key, resp.model_dump(), ttl_seconds=CacheTTL.WIDGET_CONFIG)
+    return resp

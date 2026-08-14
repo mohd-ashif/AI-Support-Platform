@@ -1,5 +1,8 @@
 import { configureStore, createSlice } from "@reduxjs/toolkit";
 import authReducer from "./slices/authSlice";
+import sourcesReducer from "./slices/sourcesSlice";
+import teamReducer from "./slices/teamSlice";
+import widgetReducer from "./slices/widgetSlice";
 
 const uiSlice = createSlice({
   name: "ui",
@@ -19,6 +22,9 @@ export const store = configureStore({
   reducer: {
     ui: uiSlice.reducer,
     auth: authReducer,
+    sources: sourcesReducer,
+    team: teamReducer,
+    widget: widgetReducer,
   },
 });
 

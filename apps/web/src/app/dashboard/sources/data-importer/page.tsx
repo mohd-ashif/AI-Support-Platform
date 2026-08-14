@@ -1,53 +1,65 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useSelector } from "react-redux";
+import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "@/store";
 import { apiFetch } from "@/lib/api";
+import {
+  setFileSourcesLoading,
+  setFileSourcesSuccess,
+  setFileSourcesError,
+  addFileSource,
+  removeFileSource,
+} from "@/store/slices/sourcesSlice";
 import { FileText, Upload, Trash2, CheckCircle2, Clock, XCircle, AlertCircle, File, HelpCircle, Loader2 } from "lucide-react";
 
 export default function DataImporterPage() {
+  const dispatch = useDispatch();
   const { selectedWorkspace, workspaces } = useSelector((state: RootState) => state.auth);
+  const fileState = useSelector((state: RootState) => state.sources.files);
+  const webState = useSelector((state: RootState) => state.sources.web);
   const activeWs = selectedWorkspace || (workspaces && workspaces.length > 0 ? workspaces[0] : null);
 
-  const [files, setFiles] = useState<any[]>([]);
-  const [webCount, setWebCount] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   const planLimit = activeWs?.plan_id === "plan_pro" ? 20 : activeWs?.plan_id === "plan_business" ? "Unlimited" : 5;
 
-  const fetchSources = async () => {
+  const fetchSources = async (force: boolean = false) => {
     if (!activeWs?.id) return;
+
+    if (!force && fileState.status === "success" && fileState.items.length > 0) {
+      return;
+    }
+
     try {
+      if (fileState.status === "idle") {
+        dispatch(setFileSourcesLoading());
+      }
       const fileData = await apiFetch("/sources/files", {
         headers: { "X-Workspace-Id": activeWs.id },
       });
-      const webData = await apiFetch("/sources/web", {
-        headers: { "X-Workspace-Id": activeWs.id },
-      });
-      setFiles(fileData || []);
-      setWebCount((webData || []).length);
+      dispatch(setFileSourcesSuccess({ items: fileData || [] }));
     } catch (err: any) {
-      // Ignore background poll errors
+      dispatch(setFileSourcesError(err.message || "Failed to fetch file sources"));
     }
   };
 
   useEffect(() => {
-    fetchSources();
+    fetchSources(false);
   }, [activeWs?.id]);
 
   useEffect(() => {
-    const hasInProgress = files.some((f) => f.status === "pending" || f.status === "processing");
+    const hasInProgress = fileState.items.some((f) => f.status === "pending" || f.status === "processing");
     if (!hasInProgress) return;
 
     const timer = setInterval(() => {
-      fetchSources();
+      fetchSources(true);
     }, 3000);
 
     return () => clearInterval(timer);
-  }, [files, activeWs?.id]);
+  }, [fileState.items, activeWs?.id]);
 
   const handleFileUpload = async (selectedFile: File) => {
     setError(null);
@@ -69,13 +81,14 @@ export default function DataImporterPage() {
       const formData = new FormData();
       formData.append("file", selectedFile);
 
-      await apiFetch("/sources/files", {
+      const createdFile = await apiFetch("/sources/files", {
         method: "POST",
         headers: { "X-Workspace-Id": activeWs?.id },
         body: formData,
       });
 
-      await fetchSources();
+      // Optimistically update Redux state directly
+      dispatch(addFileSource(createdFile));
     } catch (err: any) {
       setError(err.message || "Failed to upload document file.");
     } finally {
@@ -90,12 +103,15 @@ export default function DataImporterPage() {
         headers: { "X-Workspace-Id": activeWs?.id },
       });
       setDeleteTargetId(null);
-      await fetchSources();
+      // Optimistically update Redux state directly
+      dispatch(removeFileSource(sourceId));
     } catch (err: any) {
       setError(err.message || "Failed to delete file source.");
     }
   };
 
+  const files = fileState.items;
+  const webCount = webState.items.length;
   const totalUsed = files.length + webCount;
 
   return (
@@ -188,7 +204,14 @@ export default function DataImporterPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#1F1F1F]">
-              {files.length === 0 ? (
+              {fileState.status === "loading" && files.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="p-8 text-center text-neutral-500">
+                    <Loader2 className="h-5 w-5 animate-spin mx-auto text-[#D4AF37] mb-2" />
+                    Loading document files from cache / API...
+                  </td>
+                </tr>
+              ) : files.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="p-8 text-center text-neutral-500">
                     No document files imported yet. Drag and drop a file above to begin.
@@ -216,7 +239,7 @@ export default function DataImporterPage() {
                           </span>
                         )}
                         {isFailed && (
-                          <span className="px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 font-bold text-[10px] flex items-center space-x-1.5 w-fit" title={file.error_message}>
+                          <span className="px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 font-bold text-[10px] flex items-center space-x-1.5 w-fit" title={file.error_message || ""}>
                             <XCircle className="h-3 w-3" />
                             <span>Failed</span>
                           </span>
