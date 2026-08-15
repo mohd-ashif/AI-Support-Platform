@@ -252,7 +252,7 @@ export default function WidgetSetupPage() {
             setPreviewSending(false);
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     }, 1200);
     return () => {
       active = false;
@@ -552,11 +552,10 @@ export default function WidgetSetupPage() {
                     key={p.id}
                     type="button"
                     onClick={() => setSelectedPlatform(p.id)}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                      selectedPlatform === p.id
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${selectedPlatform === p.id
                         ? "bg-[#D4AF37] text-black shadow-md"
                         : "text-neutral-400 hover:text-white hover:bg-[#141414]"
-                    }`}
+                      }`}
                   >
                     {p.label}
                   </button>
@@ -653,11 +652,10 @@ export default function WidgetSetupPage() {
 
             {/* Floating Simulated Chat Dialog Box */}
             <div
-              className={`bg-[#111111] border border-[#262626] rounded-2xl shadow-2xl overflow-hidden flex flex-col transition-all duration-300 ${
-                previewExpanded
+              className={`bg-[#111111] border border-[#262626] rounded-2xl shadow-2xl overflow-hidden flex flex-col transition-all duration-300 ${previewExpanded
                   ? "fixed inset-4 md:inset-10 z-50 h-[calc(100vh-80px)] max-w-4xl mx-auto rounded-3xl border-[#333333] shadow-[0_0_50px_rgba(0,0,0,0.8)]"
                   : "h-[480px] relative z-10"
-              }`}
+                }`}
             >
               {/* Header with Dynamic Primary Color */}
               <div
@@ -733,9 +731,8 @@ export default function WidgetSetupPage() {
                 {previewMessages.map((msg, idx) => (
                   <div
                     key={idx}
-                    className={`flex items-start space-x-2 ${
-                      msg.sender === "user" ? "justify-end" : "justify-start"
-                    }`}
+                    className={`flex items-start space-x-2 ${msg.sender === "user" ? "justify-end" : "justify-start"
+                      }`}
                   >
                     {msg.sender === "bot" && (
                       <div
@@ -746,11 +743,10 @@ export default function WidgetSetupPage() {
                       </div>
                     )}
                     <div
-                      className={`p-3 rounded-2xl text-xs max-w-[85%] leading-relaxed shadow-md break-words whitespace-pre-wrap overflow-hidden ${
-                        msg.sender === "user"
+                      className={`p-3 rounded-2xl text-xs max-w-[85%] leading-relaxed shadow-md break-words whitespace-pre-wrap overflow-hidden ${msg.sender === "user"
                           ? "bg-[#1C1C1C] border border-[#2A2A2A] text-white rounded-tr-sm"
                           : "bg-[#161616] border border-[#262626] text-neutral-200 rounded-tl-sm"
-                      }`}
+                        }`}
                     >
                       {msg.content}
                     </div>
