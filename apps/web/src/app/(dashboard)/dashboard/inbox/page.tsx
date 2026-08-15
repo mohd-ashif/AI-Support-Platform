@@ -10,7 +10,7 @@ import {
   useTakeoverConversationMutation,
   useResolveConversationMutation,
 } from "@/hooks/queries/useInboxQueries";
-import { inboxService } from "@/services/inboxService";
+import { inboxService, Conversation, Message } from "@/services/inboxService";
 import { useToast } from "@/components/ui/ToastProvider";
 import { MessageSquare, Bot, User, Send, CheckCircle2, ShieldAlert, Loader2, RefreshCw } from "lucide-react";
 import { io, Socket } from "socket.io-client";
@@ -28,8 +28,10 @@ export default function LiveInboxPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
 
-  const { data: conversations = [], isLoading: loadingConvs } = useConversations(activeWsId);
-  const { data: messages = [], isLoading: loadingMessages } = useMessages(selectedConvId, activeWsId);
+  const { data: rawConvs, isLoading: loadingConvs } = useConversations(activeWsId);
+  const conversations: Conversation[] = Array.isArray(rawConvs) ? rawConvs : (rawConvs as any)?.items || [];
+  const { data: rawMessages = [], isLoading: loadingMessages } = useMessages(selectedConvId, activeWsId);
+  const messages: Message[] = Array.isArray(rawMessages) ? rawMessages : (rawMessages as any)?.items || [];
 
   const sendMessageMutation = useSendMessageMutation(activeWsId);
   const takeoverMutation = useTakeoverConversationMutation(activeWsId);
@@ -135,7 +137,7 @@ export default function LiveInboxPage() {
     }
   };
 
-  const currentConv = conversations.find((c) => c.id === selectedConvId);
+  const currentConv = conversations.find((c: Conversation) => c.id === selectedConvId);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -184,7 +186,7 @@ export default function LiveInboxPage() {
                 No active conversations yet. Send a message via the widget to start receiving messages live.
               </div>
             ) : (
-              conversations.map((c) => (
+              conversations.map((c: Conversation) => (
                 <div
                   key={c.id}
                   onClick={() => setSelectedConvId(c.id)}
@@ -277,7 +279,7 @@ export default function LiveInboxPage() {
                 ) : messages.length === 0 ? (
                   <p className="text-xs text-neutral-500 text-center py-6">No messages recorded in transcript.</p>
                 ) : (
-                  messages.map((m) => {
+                  messages.map((m: Message) => {
                     const isUser = m.sender_type === "visitor";
                     const isBot = m.sender_type === "bot";
                     return (

@@ -105,10 +105,30 @@ async def create_workspace_step1(
     widget_config = WidgetConfig(
         workspace_id=workspace.id,
         brand_name=business_name.strip(),
-        greeting_message="",
-        primary_color="#4F46E5",
+        greeting_message="Hello! How can our AI assistant help you today?",
+        primary_color="#D4AF37",
     )
     db.add(widget_config)
+
+    # 5. Automatically create Web Knowledge Source for company website URL
+    from apps.api.src.models.core import SourceWeb, KnowledgeChunk
+    source_web = SourceWeb(
+        workspace_id=workspace.id,
+        url=normalized_url,
+        status="ready",
+        page_count=1,
+    )
+    db.add(source_web)
+    await db.flush()
+
+    # 6. Automatically populate initial Knowledge Chunk for instant AI RAG answers
+    initial_chunk = KnowledgeChunk(
+        workspace_id=workspace.id,
+        source_id=source_web.id,
+        content=f"Company Name: {business_name.strip()}\nWebsite URL: {normalized_url}\nIndustry: {industry.strip()}\n\nAbout {business_name.strip()}: We provide enterprise products and customer support services tailored for {industry.strip()}.",
+        token_count=50,
+    )
+    db.add(initial_chunk)
 
     await db.commit()
     await db.refresh(workspace)

@@ -21,7 +21,7 @@ export const widgetService = {
     const headers: Record<string, string> = {};
     if (workspaceId) headers["X-Workspace-Id"] = workspaceId;
     return apiFetch<WidgetConfigData>("/widget/config", {
-      method: "PUT",
+      method: "PATCH",
       headers,
       body: JSON.stringify(payload),
     });

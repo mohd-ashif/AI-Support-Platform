@@ -9,6 +9,12 @@ import { logoutUser, setSelectedWorkspace } from "@/store/slices/authSlice";
 import { useLogoutMutation } from "@/hooks/queries/useAuthQueries";
 import { useUIStore } from "@/stores/useUIStore";
 import { useToast } from "@/components/ui/ToastProvider";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "@/lib/queryKeys";
+import { widgetService } from "@/services/widgetService";
+import { teamService } from "@/services/teamService";
+import { inboxService } from "@/services/inboxService";
+import { analyticsService } from "@/services/analyticsService";
 import {
   Bot,
   LayoutDashboard,
@@ -32,6 +38,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter();
   const dispatch = useDispatch();
   const toast = useToast();
+  const queryClient = useQueryClient();
 
   const user = useSelector((state: RootState) => state.auth.user);
   const workspaces = useSelector((state: RootState) => state.auth.workspaces || []);
@@ -41,6 +48,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const logoutMutation = useLogoutMutation();
 
   const activeWs = selectedWorkspace || (workspaces.length > 0 ? workspaces[0] : null);
+  const activeWsId = activeWs?.id;
 
   // Close workspace dropdown on outside click
   React.useEffect(() => {
@@ -166,11 +174,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.href;
+
+              const handlePrefetch = () => {
+                if (!activeWsId) return;
+                if (item.href.includes("widget")) {
+                  queryClient.prefetchQuery({ queryKey: queryKeys.widget.config(activeWsId), queryFn: () => widgetService.getConfig(activeWsId) });
+                } else if (item.href.includes("team")) {
+                  queryClient.prefetchQuery({ queryKey: queryKeys.team.members(activeWsId), queryFn: () => teamService.getMembers(activeWsId) });
+                } else if (item.href.includes("inbox")) {
+                  queryClient.prefetchQuery({ queryKey: queryKeys.inbox.conversations(activeWsId), queryFn: () => inboxService.getConversations(activeWsId) });
+                } else if (item.href.includes("analytics")) {
+                  queryClient.prefetchQuery({ queryKey: queryKeys.analytics.summary(activeWsId, "7d"), queryFn: () => analyticsService.getSummary("7d", activeWsId) });
+                }
+              };
+
               return (
                 <Link
                   key={item.name}
                   href={item.href}
                   prefetch={true}
+                  onMouseEnter={handlePrefetch}
                   className={`group relative flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all duration-200 ease-out active:scale-[0.98] ${
                     isActive
                       ? "bg-gradient-to-r from-[#D4AF37]/20 via-[#D4AF37]/10 to-transparent text-[#D4AF37] border border-[#D4AF37]/40 shadow-lg shadow-[#D4AF37]/5 translate-x-1"
