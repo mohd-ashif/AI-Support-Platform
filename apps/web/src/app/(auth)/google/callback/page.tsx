@@ -4,13 +4,15 @@ import React, { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useDispatch } from "react-redux";
 import { setAuth } from "@/store/slices/authSlice";
-import { apiFetch } from "@/lib/api";
+import { authService } from "@/services/authService";
+import { useToast } from "@/components/ui/ToastProvider";
 import { Loader2, AlertCircle } from "lucide-react";
 
 export default function GoogleCallbackPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const dispatch = useDispatch();
+  const toast = useToast();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -22,10 +24,7 @@ export default function GoogleCallbackPage() {
 
     async function processGoogleAuth() {
       try {
-        const response = await apiFetch("/auth/google", {
-          method: "POST",
-          body: JSON.stringify({ code }),
-        });
+        const response = await authService.googleAuth(code!);
 
         dispatch(
           setAuth({
@@ -35,21 +34,25 @@ export default function GoogleCallbackPage() {
           })
         );
 
+        toast.success("Google Authentication successful!");
+
         if (response.workspaces && response.workspaces.length > 0) {
           router.push("/dashboard");
         } else {
           router.push("/onboarding");
         }
       } catch (err: any) {
-        setError(err.message || "Failed to complete Google authentication.");
+        const msg = err.message || "Failed to complete Google authentication.";
+        setError(msg);
+        toast.error(msg);
       }
     }
 
     processGoogleAuth();
-  }, [searchParams, dispatch, router]);
+  }, [searchParams, dispatch, router, toast]);
 
   return (
-    <div className="w-full space-y-4 text-center py-8">
+    <div className="w-full space-y-4 text-center py-8 animate-in fade-in duration-300">
       {error ? (
         <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-start space-x-3 text-left">
           <AlertCircle className="h-5 w-5 shrink-0 mt-0.5" />
@@ -57,9 +60,9 @@ export default function GoogleCallbackPage() {
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center space-y-3">
-          <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+          <Loader2 className="h-8 w-8 animate-spin text-[#D4AF37]" />
           <h3 className="text-lg font-semibold text-white">Completing Google Sign In...</h3>
-          <p className="text-xs text-slate-400">Please wait while we set up your secure session.</p>
+          <p className="text-xs text-neutral-400">Please wait while we set up your secure session.</p>
         </div>
       )}
     </div>

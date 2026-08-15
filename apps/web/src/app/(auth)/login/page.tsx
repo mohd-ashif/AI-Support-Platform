@@ -8,6 +8,9 @@ import { zodResolver } from "@/lib/zodResolver";
 import * as z from "zod";
 import { useDispatch } from "react-redux";
 import { setAuth } from "@/store/slices/authSlice";
+import { useLoginMutation } from "@/hooks/queries/useAuthQueries";
+import { authService } from "@/services/authService";
+import { useToast } from "@/components/ui/ToastProvider";
 import { apiFetch } from "@/lib/api";
 import { Loader2, AlertCircle, ArrowRight } from "lucide-react";
 
@@ -21,13 +24,16 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 export default function LoginPage() {
   const router = useRouter();
   const dispatch = useDispatch();
+  const toast = useToast();
+  const loginMutation = useLoginMutation();
+
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
   });
@@ -35,10 +41,7 @@ export default function LoginPage() {
   const onSubmit = async (data: LoginFormValues) => {
     setErrorMessage(null);
     try {
-      const response = await apiFetch("/auth/login", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
+      const response = await loginMutation.mutateAsync(data);
 
       dispatch(
         setAuth({
@@ -47,6 +50,8 @@ export default function LoginPage() {
           workspaces: response.workspaces,
         })
       );
+
+      toast.success("Successfully logged in!");
 
       const redirectUrl = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("redirect") : null;
       if (redirectUrl) {
@@ -57,7 +62,9 @@ export default function LoginPage() {
         router.push("/onboarding");
       }
     } catch (err: any) {
-      setErrorMessage(err.message || "Failed to log in. Please check your credentials.");
+      const msg = err.message || "Failed to log in. Please check your credentials.";
+      setErrorMessage(msg);
+      toast.error(msg);
     }
   };
 
@@ -65,14 +72,11 @@ export default function LoginPage() {
     setGoogleLoading(true);
     setErrorMessage(null);
     try {
-      const res = await apiFetch("/auth/google/url");
+      const res = await authService.getGoogleUrl();
       if (res?.url) {
         window.location.href = res.url;
       } else {
-        const demoRes = await apiFetch("/auth/google", {
-          method: "POST",
-          body: JSON.stringify({ code: "demo_code_123" }),
-        });
+        const demoRes = await authService.googleAuth("demo_code_123");
         dispatch(
           setAuth({
             user: demoRes.user,
@@ -80,16 +84,19 @@ export default function LoginPage() {
             workspaces: demoRes.workspaces,
           })
         );
+        toast.success("Google login successful!");
         router.push(demoRes.workspaces?.length ? "/dashboard" : "/onboarding");
       }
     } catch (err: any) {
-      setErrorMessage(err.message || "Failed to initialize Google login.");
+      const msg = err.message || "Failed to initialize Google login.";
+      setErrorMessage(msg);
+      toast.error(msg);
       setGoogleLoading(false);
     }
   };
 
   return (
-    <div className="w-full space-y-6">
+    <div className="w-full space-y-6 animate-in fade-in duration-300">
       {/* Title Header */}
       <div className="space-y-2 text-center lg:text-left">
         <h2 className="text-3xl font-extrabold text-white tracking-tight">
@@ -112,7 +119,7 @@ export default function LoginPage() {
       <button
         type="button"
         onClick={handleGoogleLogin}
-        disabled={googleLoading || isSubmitting}
+        disabled={googleLoading || loginMutation.isPending}
         className="w-full flex items-center justify-center space-x-3 px-4 py-3 rounded-xl bg-[#111111] border border-[#222222] hover:border-[#D4AF37]/50 hover:bg-[#181818] text-white text-sm font-medium transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/40 disabled:opacity-60"
       >
         {googleLoading ? (
@@ -181,10 +188,10 @@ export default function LoginPage() {
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={loginMutation.isPending}
           className="w-full flex items-center justify-center space-x-2 py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#D4AF37] via-[#F4D03F] to-[#FFEAA7] hover:brightness-110 text-[#050505] font-bold text-sm shadow-lg shadow-[#D4AF37]/20 transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/40 disabled:opacity-60"
         >
-          {isSubmitting ? (
+          {loginMutation.isPending ? (
             <Loader2 className="h-4 w-4 animate-spin text-[#050505]" />
           ) : (
             <>

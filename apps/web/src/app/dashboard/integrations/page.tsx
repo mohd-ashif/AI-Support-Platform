@@ -1,61 +1,46 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store";
-import { apiFetch } from "@/lib/api";
-import { Code2, Copy, Check, Terminal, FileCode, Layers, Info } from "lucide-react";
+import { useIntegrationSnippet } from "@/hooks/queries/useIntegrationQueries";
+import { useToast } from "@/components/ui/ToastProvider";
+import { Code2, Copy, Check, Terminal, FileCode, Layers, Info, Loader2 } from "lucide-react";
 
 export default function IntegrationsPage() {
+  const toast = useToast();
   const { selectedWorkspace, workspaces } = useSelector((state: RootState) => state.auth);
   const activeWs = selectedWorkspace || (workspaces && workspaces.length > 0 ? workspaces[0] : null);
+  const activeWsId = activeWs?.id;
 
   const [activeTab, setActiveTab] = useState<"html" | "react" | "nextjs" | "other">("html");
-  const [snippets, setSnippets] = useState<Record<string, any>>({});
   const [copiedId, setCopiedId] = useState(false);
   const [copiedSnippet, setCopiedSnippet] = useState(false);
 
-  useEffect(() => {
-    if (!activeWs?.id) return;
-
-    // STEP 6: Fetch snippets for all platforms on page load
-    async function loadSnippets() {
-      const platforms: ("html" | "react" | "nextjs" | "other")[] = ["html", "react", "nextjs", "other"];
-      const loaded: Record<string, any> = {};
-
-      for (const p of platforms) {
-        try {
-          const res = await apiFetch(`/integrations/snippet?platform=${p}`, {
-            headers: { "X-Workspace-Id": activeWs.id },
-          });
-          if (res) loaded[p] = res;
-        } catch (e) {}
-      }
-      setSnippets(loaded);
-    }
-
-    loadSnippets();
-  }, [activeWs?.id]);
+  const { data: snippetData, isLoading } = useIntegrationSnippet(activeTab, activeWsId);
 
   const handleCopyId = () => {
     if (!activeWs?.workspace_uuid) return;
     navigator.clipboard.writeText(activeWs.workspace_uuid);
     setCopiedId(true);
+    toast.success("Workspace Identifier copied to clipboard!");
     setTimeout(() => setCopiedId(false), 2000);
   };
 
   const handleCopySnippet = () => {
-    const snippetText = snippets[activeTab]?.snippet_code;
+    const snippetText = (snippetData as any)?.snippet_code || (snippetData as any)?.snippet;
     if (!snippetText) return;
     navigator.clipboard.writeText(snippetText);
     setCopiedSnippet(true);
+    toast.success("Integration snippet copied to clipboard!");
     setTimeout(() => setCopiedSnippet(false), 2000);
   };
 
-  const currentSnippet = snippets[activeTab];
+  const snippetCode = (snippetData as any)?.snippet_code || (snippetData as any)?.snippet || "";
+  const instructions = (snippetData as any)?.instructions || "";
 
   return (
-    <div className="p-8 bg-[#050505] min-h-screen text-white space-y-8">
+    <div className="p-8 bg-[#050505] min-h-screen text-white space-y-8 animate-in fade-in duration-300">
       {/* Header */}
       <div className="space-y-1">
         <h1 className="text-2xl font-extrabold flex items-center space-x-2">
@@ -135,7 +120,8 @@ export default function IntegrationsPage() {
             <button
               type="button"
               onClick={handleCopySnippet}
-              className="px-3.5 py-1.5 bg-[#1C1C1C] hover:bg-[#282828] border border-[#2B2B2B] text-neutral-200 font-bold text-xs rounded-xl transition-all flex items-center space-x-1.5"
+              disabled={isLoading || !snippetCode}
+              className="px-3.5 py-1.5 bg-[#1C1C1C] hover:bg-[#282828] border border-[#2B2B2B] text-neutral-200 font-bold text-xs rounded-xl transition-all flex items-center space-x-1.5 disabled:opacity-50"
             >
               {copiedSnippet ? (
                 <>
@@ -152,14 +138,21 @@ export default function IntegrationsPage() {
           </div>
 
           <pre className="p-4 bg-[#050505] border border-[#1C1C1C] rounded-xl text-xs font-mono text-emerald-400 overflow-x-auto leading-relaxed shadow-inner">
-            <code>{currentSnippet?.snippet_code || "Loading snippet code..."}</code>
+            {isLoading ? (
+              <div className="flex items-center space-x-2 text-neutral-400">
+                <Loader2 className="h-4 w-4 animate-spin text-[#D4AF37]" />
+                <span>Generating integration code snippet...</span>
+              </div>
+            ) : (
+              <code>{snippetCode || "// Select a platform above to view snippet"}</code>
+            )}
           </pre>
 
           {/* Instructions */}
-          {currentSnippet?.instructions && (
+          {instructions && (
             <div className="p-4 bg-[#080808] border border-[#1C1C1C] rounded-xl text-xs text-neutral-300 flex items-start space-x-3">
               <Info className="h-4 w-4 text-[#D4AF37] shrink-0 mt-0.5" />
-              <div className="whitespace-pre-line leading-relaxed">{currentSnippet.instructions}</div>
+              <div className="whitespace-pre-line leading-relaxed">{instructions}</div>
             </div>
           )}
         </div>

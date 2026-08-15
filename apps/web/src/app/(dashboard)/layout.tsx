@@ -6,7 +6,9 @@ import { usePathname, useRouter } from "next/navigation";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "@/store";
 import { logoutUser, setSelectedWorkspace } from "@/store/slices/authSlice";
-import { apiFetch } from "@/lib/api";
+import { useLogoutMutation } from "@/hooks/queries/useAuthQueries";
+import { useUIStore } from "@/stores/useUIStore";
+import { useToast } from "@/components/ui/ToastProvider";
 import {
   Bot,
   LayoutDashboard,
@@ -29,9 +31,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const pathname = usePathname();
   const router = useRouter();
   const dispatch = useDispatch();
+  const toast = useToast();
 
-  const { user, workspaces, selectedWorkspace } = useSelector((state: RootState) => state.auth);
+  const user = useSelector((state: RootState) => state.auth.user);
+  const workspaces = useSelector((state: RootState) => state.auth.workspaces || []);
+  const selectedWorkspace = useSelector((state: RootState) => state.auth.selectedWorkspace);
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+
+  const logoutMutation = useLogoutMutation();
 
   const activeWs = selectedWorkspace || (workspaces.length > 0 ? workspaces[0] : null);
 
@@ -49,11 +56,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const handleLogout = async () => {
     try {
-      await apiFetch("/auth/logout", { method: "POST" });
+      await logoutMutation.mutateAsync();
     } catch (e) {
       // Ignore network errors on logout
     }
     dispatch(logoutUser());
+    toast.info("Logged out of session.");
     if (typeof window !== "undefined") {
       window.location.href = "/login";
     }

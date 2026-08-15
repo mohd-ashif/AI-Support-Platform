@@ -2,7 +2,11 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { apiFetch, getMemoryAccessToken, setMemoryWorkspaceId } from "@/lib/api";
+import { teamService } from "@/services/teamService";
+import { authService } from "@/services/authService";
+import { workspaceService } from "@/services/workspaceService";
+import { useToast } from "@/components/ui/ToastProvider";
+import { getMemoryAccessToken, setMemoryWorkspaceId } from "@/lib/api";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "@/store";
 import { setAuth, setSelectedWorkspace } from "@/store/slices/authSlice";
@@ -16,8 +20,9 @@ export default function InviteAcceptancePage({ params }: InvitePageProps) {
   const inviteToken = params?.token;
   const router = useRouter();
   const dispatch = useDispatch();
+  const toast = useToast();
 
-  const { isAuthenticated, accessToken: reduxToken } = useSelector((state: RootState) => state.auth);
+  const { reduxToken } = useSelector((state: RootState) => (state.auth as any));
   const token = reduxToken || getMemoryAccessToken();
 
   const [details, setDetails] = useState<{
@@ -25,6 +30,7 @@ export default function InviteAcceptancePage({ params }: InvitePageProps) {
     workspace_name: string;
     role: string;
     valid: boolean;
+    status?: string;
   } | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -41,13 +47,17 @@ export default function InviteAcceptancePage({ params }: InvitePageProps) {
     setLoading(true);
     setError(null);
     try {
-      const res = await apiFetch(`/settings/invites/${inviteToken}`);
-      setDetails(res);
+      const res = await teamService.getInviteDetails(inviteToken);
+      setDetails(res as any);
       if (!res.valid) {
-        setError("This invitation link is invalid or has expired.");
+        const msg = "This invitation link is invalid or has expired.";
+        setError(msg);
+        toast.error(msg);
       }
     } catch (err: any) {
-      setError(err.message || "Failed to load invitation details.");
+      const msg = err.message || "Failed to load invitation details.";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -63,7 +73,6 @@ export default function InviteAcceptancePage({ params }: InvitePageProps) {
     setAccepting(true);
     setError(null);
 
-    // If user is not logged in, redirect them to login first with return URL
     const userAuthToken = getMemoryAccessToken();
     if (!userAuthToken) {
       router.push(`/login?redirect=/invite/${inviteToken}`);
@@ -71,14 +80,14 @@ export default function InviteAcceptancePage({ params }: InvitePageProps) {
     }
 
     try {
-      const res = await apiFetch(`/settings/invites/${inviteToken}/accept`, {
-        method: "POST",
-      });
+      const res: any = await teamService.acceptInvite(inviteToken, {});
       setSuccess(true);
+      toast.success("Invitation accepted! Welcome to the team.");
 
-      const userRes = await apiFetch("/auth/me").catch(() => null);
-      const workspacesRes = await apiFetch("/workspaces").catch(() => []);
+      const userRes = await authService.getCurrentUser().catch(() => null);
+      const workspacesRes = await workspaceService.getWorkspaces().catch(() => []);
       const currentToken = getMemoryAccessToken();
+
       if (userRes && currentToken) {
         dispatch(
           setAuth({
@@ -93,7 +102,7 @@ export default function InviteAcceptancePage({ params }: InvitePageProps) {
           );
           if (joinedWs) {
             dispatch(setSelectedWorkspace(joinedWs));
-            setMemoryWorkspaceId(joinedWs.id || joinedWs.workspace_id);
+            setMemoryWorkspaceId(joinedWs.id || (joinedWs as any).workspace_id);
           }
         }
       }
@@ -105,7 +114,9 @@ export default function InviteAcceptancePage({ params }: InvitePageProps) {
       if (err.status === 401 || err.message?.includes("401") || err.message?.includes("token")) {
         router.push(`/login?redirect=/invite/${inviteToken}`);
       } else {
-        setError(err.message || "Failed to accept invitation. Make sure you are logged into the matching account.");
+        const msg = err.message || "Failed to accept invitation. Make sure you are logged into the matching account.";
+        setError(msg);
+        toast.error(msg);
       }
     } finally {
       setAccepting(false);
@@ -113,8 +124,8 @@ export default function InviteAcceptancePage({ params }: InvitePageProps) {
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center p-4 font-sans">
-      <div className="max-w-md w-full bg-[#111111] border border-[#222222] rounded-3xl p-8 space-y-6 shadow-2xl animate-in zoom-in-95">
+    <div className="min-h-screen bg-[#050505] text-white flex items-center justify-center p-4 font-sans animate-in fade-in duration-300">
+      <div className="max-w-md w-full bg-[#111111] border border-[#222222] rounded-3xl p-8 space-y-6 shadow-2xl">
         {/* Header Branding */}
         <div className="text-center space-y-2">
           <div className="h-12 w-12 rounded-2xl bg-gradient-to-tr from-[#D4AF37] to-[#F4D03F] text-[#050505] font-extrabold text-xl flex items-center justify-center mx-auto shadow-lg">

@@ -5,14 +5,20 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { setWorkspaces, setSelectedWorkspace } from "@/store/slices/authSlice";
+import { useWorkspaces } from "@/hooks/queries/useWorkspaceQueries";
+import { billingService } from "@/services/billingService";
+import { useToast } from "@/components/ui/ToastProvider";
 import { apiFetch } from "@/lib/api";
-import { Bot, Loader2, CheckCircle2, Clock, RefreshCw, AlertTriangle } from "lucide-react";
+import { Bot, Loader2, CheckCircle2, RefreshCw, AlertTriangle } from "lucide-react";
 
 function SuccessContent() {
   const router = useRouter();
   const dispatch = useDispatch();
+  const toast = useToast();
   const searchParams = useSearchParams();
   const { selectedWorkspace } = useSelector((state: RootState) => state.auth);
+
+  const { refetch: refetchWorkspaces } = useWorkspaces(false);
 
   const sessionId = searchParams.get("session_id");
   const workspaceId = searchParams.get("workspace_id") || selectedWorkspace?.id || "";
@@ -40,8 +46,7 @@ function SuccessContent() {
         pollCount += 1;
         setAttempts(pollCount);
 
-        const url = `/billing/checkout-status?session_id=${encodeURIComponent(sessionId)}&workspace_id=${encodeURIComponent(workspaceId)}`;
-        const res = await apiFetch(url);
+        const res = await billingService.getCheckoutStatus(sessionId, workspaceId);
 
         if (res?.is_mock) {
           setIsMockCheckout(true);
@@ -52,26 +57,26 @@ function SuccessContent() {
           if (interval) clearInterval(interval);
 
           try {
-            const freshWorkspaces = await apiFetch("/workspaces");
-            dispatch(setWorkspaces(freshWorkspaces));
-            if (workspaceId) {
-              const activeWs = freshWorkspaces.find((w: any) => w.id === workspaceId);
-              if (activeWs) {
-                dispatch(setSelectedWorkspace(activeWs));
+            const { data: freshWorkspaces } = await refetchWorkspaces();
+            if (freshWorkspaces) {
+              dispatch(setWorkspaces(freshWorkspaces));
+              if (workspaceId) {
+                const activeWs = freshWorkspaces.find((w: any) => w.id === workspaceId);
+                if (activeWs) {
+                  dispatch(setSelectedWorkspace(activeWs));
+                }
               }
             }
           } catch (e) {}
 
+          toast.success("Subscription payment confirmed!");
           setTimeout(() => {
             router.push("/dashboard");
           }, 1200);
           return;
         }
-      } catch (e) {
-        // Continue polling until max attempts
-      }
+      } catch (e) {}
 
-      // Timeout fallback after 10 attempts (~15 seconds)
       if (pollCount >= 10) {
         setStatus("timeout");
         if (interval) clearInterval(interval);
@@ -84,18 +89,20 @@ function SuccessContent() {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [sessionId, workspaceId, router, dispatch]);
+  }, [sessionId, workspaceId, router, dispatch, refetchWorkspaces, toast]);
 
   const handleManualCheck = async () => {
     setStatus("polling");
     setAttempts(0);
     try {
-      const url = `/billing/checkout-status?session_id=${encodeURIComponent(sessionId || "")}&workspace_id=${encodeURIComponent(workspaceId)}`;
-      const res = await apiFetch(url);
+      const res = await billingService.getCheckoutStatus(sessionId || "", workspaceId);
       if (res?.status === "active") {
         setStatus("confirmed");
-        const freshWorkspaces = await apiFetch("/workspaces");
-        dispatch(setWorkspaces(freshWorkspaces));
+        const { data: freshWorkspaces } = await refetchWorkspaces();
+        if (freshWorkspaces) {
+          dispatch(setWorkspaces(freshWorkspaces));
+        }
+        toast.success("Payment verified!");
         setTimeout(() => router.push("/dashboard"), 1200);
       } else {
         setTimeout(() => setStatus("timeout"), 2000);
@@ -106,65 +113,66 @@ function SuccessContent() {
   };
 
   return (
-    <div className="w-full max-w-md bg-[#111111] border border-[#222222] rounded-2xl p-8 text-center space-y-6 shadow-2xl relative overflow-hidden">
-      {/* Dev Mode Banner */}
+    <div className="w-full max-w-md bg-[#111111] border border-[#222222] rounded-2xl p-8 text-center space-y-6 shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300">
       {isMockCheckout && (
-        <div className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-extrabold uppercase">
-          <AlertTriangle className="h-3 w-3" />
-          <span>Dev Mode: Simulated Payment</span>
+        <div className="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[11px] font-semibold py-1.5 px-3 rounded-full inline-flex items-center space-x-1.5 mb-2">
+          <AlertTriangle className="h-3.5 w-3.5" />
+          <span>Local Development Mock Payment Verified</span>
         </div>
       )}
 
-      <div className="mx-auto h-12 w-12 rounded-2xl bg-gradient-to-tr from-[#D4AF37] via-[#F4D03F] to-[#FFEAA7] flex items-center justify-center shadow-xl shadow-[#D4AF37]/20">
-        <Bot className="h-6 w-6 text-[#050505]" />
-      </div>
-
       {status === "polling" && (
-        <div className="space-y-3">
-          <Loader2 className="h-7 w-7 animate-spin text-[#D4AF37] mx-auto" />
-          <h2 className="text-lg font-extrabold text-white">Confirming Your Subscription...</h2>
-          <p className="text-xs text-neutral-400">
-            Verifying payment status ({attempts}/10)
-          </p>
+        <div className="space-y-4">
+          <div className="h-16 w-16 rounded-2xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 flex items-center justify-center mx-auto">
+            <Loader2 className="h-8 w-8 text-[#D4AF37] animate-spin" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-extrabold text-white">Verifying Stripe Subscription...</h2>
+            <p className="text-xs text-neutral-400">
+              Confirming payment webhook receipt (Attempt {attempts}/10)
+            </p>
+          </div>
         </div>
       )}
 
       {status === "confirmed" && (
-        <div className="space-y-3">
-          <CheckCircle2 className="h-10 w-10 text-emerald-400 mx-auto" />
-          <h2 className="text-xl font-extrabold text-white">Subscription Active!</h2>
-          <p className="text-xs text-neutral-300">
-            Your workspace session is fully provisioned. Redirecting to your AI dashboard...
-          </p>
+        <div className="space-y-4">
+          <div className="h-16 w-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto">
+            <CheckCircle2 className="h-8 w-8 text-emerald-400" />
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-xl font-extrabold text-white">Payment Confirmed!</h2>
+            <p className="text-xs text-neutral-400">Redirecting to your SupportAI workspace dashboard...</p>
+          </div>
         </div>
       )}
 
       {status === "timeout" && (
         <div className="space-y-4">
-          <Clock className="h-10 w-10 text-amber-400 mx-auto" />
+          <div className="h-16 w-16 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center mx-auto">
+            <AlertTriangle className="h-8 w-8 text-amber-400" />
+          </div>
           <div className="space-y-1">
-            <h2 className="text-lg font-extrabold text-white">Verification Taking Longer Than Expected</h2>
+            <h2 className="text-xl font-extrabold text-white">Confirmation Pending</h2>
             <p className="text-xs text-neutral-400">
-              Payment verification is taking a moment to finish. Your subscription selection is stored.
+              Your subscription is being activated by Stripe webhooks. You can proceed directly to your dashboard.
             </p>
           </div>
-
-          <div className="pt-2 space-y-2">
-            <button
-              type="button"
-              onClick={handleManualCheck}
-              className="w-full py-2.5 rounded-xl bg-[#D4AF37] text-black font-extrabold text-xs hover:brightness-110 transition-all flex items-center justify-center space-x-2"
-            >
-              <RefreshCw className="h-4 w-4" />
-              <span>Check Status Again</span>
-            </button>
-
+          <div className="pt-2 flex flex-col space-y-2">
             <button
               type="button"
               onClick={() => router.push("/dashboard")}
-              className="w-full py-2.5 rounded-xl bg-[#1A1A1A] border border-[#2B2B2B] text-neutral-300 hover:text-white font-bold text-xs transition-all"
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-[#D4AF37] via-[#F4D03F] to-[#FFEAA7] text-[#050505] font-bold text-xs hover:brightness-110 shadow-lg"
             >
-              Proceed to Dashboard Anyway
+              Go to Dashboard Now
+            </button>
+            <button
+              type="button"
+              onClick={handleManualCheck}
+              className="w-full py-2.5 rounded-xl bg-[#1A1A1A] border border-[#2B2B2B] text-neutral-300 font-semibold text-xs hover:text-white flex items-center justify-center space-x-1.5"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>Check Payment Again</span>
             </button>
           </div>
         </div>
@@ -175,13 +183,8 @@ function SuccessContent() {
 
 export default function SubscriptionSuccessPage() {
   return (
-    <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-6">
-      <Suspense fallback={
-        <div className="text-center space-y-3">
-          <Loader2 className="h-8 w-8 animate-spin text-[#D4AF37] mx-auto" />
-          <p className="text-xs text-neutral-400">Loading Checkout Status...</p>
-        </div>
-      }>
+    <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-4">
+      <Suspense fallback={<Loader2 className="h-8 w-8 animate-spin text-[#D4AF37]" />}>
         <SuccessContent />
       </Suspense>
     </div>

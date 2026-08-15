@@ -3,7 +3,9 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store";
-import { apiFetch } from "@/lib/api";
+import { useWidgetConfig, useUpdateWidgetConfigMutation } from "@/hooks/queries/useWidgetQueries";
+import { integrationService } from "@/services/integrationService";
+import { useToast } from "@/components/ui/ToastProvider";
 import {
   Sliders,
   Bot,
@@ -35,8 +37,13 @@ interface ContentCard {
 }
 
 export default function WidgetSetupPage() {
+  const toast = useToast();
   const { selectedWorkspace, workspaces } = useSelector((state: RootState) => state.auth);
   const activeWs = selectedWorkspace || (workspaces.length > 0 ? workspaces[0] : null);
+  const activeWsId = activeWs?.id;
+
+  const { data: configData, isLoading: isConfigLoading } = useWidgetConfig(activeWsId);
+  const updateConfigMutation = useUpdateWidgetConfigMutation(activeWsId);
 
   const [form, setForm] = useState<{
     brand_name: string;
@@ -72,50 +79,41 @@ export default function WidgetSetupPage() {
 
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // 1. Load initial widget config on mount
+  // 1. Sync configData into form on query load
   useEffect(() => {
-    async function loadConfig() {
-      try {
-        const data = await apiFetch("/widget/config");
-        if (data) {
-          setForm({
-            brand_name: data.brand_name || "SupportAI",
-            tagline: data.tagline || "",
-            logo_url: data.logo_url || "",
-            primary_color: data.primary_color || "#D4AF37",
-            greeting_message: data.greeting_message || "Hello! How can our AI assistant help you today?",
-            content_cards_json: Array.isArray(data.content_cards_json) && data.content_cards_json.length > 0
-              ? data.content_cards_json
-              : [],
-          });
-        }
-      } catch (err: any) {
-        console.error("Failed to load widget config:", err);
-      } finally {
-        setInitialLoaded(true);
-      }
+    if (configData) {
+      setForm({
+        brand_name: configData.brand_name || "SupportAI",
+        tagline: configData.tagline || "",
+        logo_url: configData.logo_url || "",
+        primary_color: configData.primary_color || "#D4AF37",
+        greeting_message: configData.greeting_message || "Hello! How can our AI assistant help you today?",
+        content_cards_json: Array.isArray(configData.content_cards_json) && configData.content_cards_json.length > 0
+          ? configData.content_cards_json
+          : [],
+      });
+      setInitialLoaded(true);
     }
-    loadConfig();
-  }, []);
+  }, [configData]);
 
-  // 2. Debounced Autosave on form changes (800ms)
+  // 2. Debounced Autosave via TanStack Query mutation
   const saveConfig = useCallback(
     async (updatedForm: typeof form) => {
       setSaveStatus("saving");
       setErrorMessage(null);
       try {
-        await apiFetch("/widget/config", {
-          method: "PATCH",
-          body: JSON.stringify(updatedForm),
-        });
+        await updateConfigMutation.mutateAsync(updatedForm);
         setSaveStatus("saved");
+        toast.success("Widget configuration autosaved successfully.");
         setTimeout(() => setSaveStatus("idle"), 2500);
       } catch (err: any) {
         setSaveStatus("error");
-        setErrorMessage(err.message || "Failed to save customization.");
+        const msg = err.message || "Failed to save customization.";
+        setErrorMessage(msg);
+        toast.error(msg);
       }
     },
-    []
+    [updateConfigMutation, toast]
   );
 
   const handleFormChange = (field: keyof typeof form, value: any) => {
@@ -176,12 +174,12 @@ export default function WidgetSetupPage() {
     if (snippetsCache[platform]) return;
     setLoadingSnippet(true);
     try {
-      const data = await apiFetch(`/integrations/snippet?platform=${platform}`);
-      if (data && data.snippet_code) {
+      const data = await integrationService.getSnippet(platform, activeWsId);
+      if (data && (data.snippet_code || data.snippet)) {
         setSnippetsCache((prev) => ({
           ...prev,
           [platform]: {
-            snippet_code: data.snippet_code,
+            snippet_code: data.snippet_code || data.snippet || "",
             instructions: data.instructions || "Paste this script tag directly into your website before the closing </body> tag.",
           },
         }));
@@ -191,7 +189,7 @@ export default function WidgetSetupPage() {
     } finally {
       setLoadingSnippet(false);
     }
-  }, [snippetsCache]);
+  }, [snippetsCache, activeWsId]);
 
   useEffect(() => {
     fetchSnippetForPlatform(selectedPlatform);
@@ -216,6 +214,7 @@ export default function WidgetSetupPage() {
       document.body.removeChild(textArea);
     }
     setCopied(true);
+    toast.success("Snippet copied to clipboard!");
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -241,7 +240,7 @@ export default function WidgetSetupPage() {
     let active = true;
     const interval = setInterval(async () => {
       try {
-        const msgs = await apiFetch(`/public/${embedUuid}/conversations/${previewConvId}/messages`);
+        const msgs = await integrationService.getPublicMessages(embedUuid, previewConvId);
         if (active && Array.isArray(msgs) && msgs.length > 0) {
           const formatted = msgs.map((m: any) => ({
             sender: (m.sender_type === "visitor" ? "user" : "bot") as "user" | "bot",
@@ -283,10 +282,7 @@ export default function WidgetSetupPage() {
 
       // Create conversation if one does not exist yet
       if (!convId) {
-        const convRes = await apiFetch(`/public/${embedUuid}/conversations`, {
-          method: "POST",
-          body: JSON.stringify({ visitor_id: visitorId }),
-        });
+        const convRes = await integrationService.createPublicConversation(embedUuid, visitorId);
         if (convRes && convRes.conversation_id) {
           convId = convRes.conversation_id;
           setPreviewConvId(convId);
@@ -294,10 +290,7 @@ export default function WidgetSetupPage() {
       }
 
       if (convId) {
-        await apiFetch(`/public/${embedUuid}/conversations/${convId}/messages`, {
-          method: "POST",
-          body: JSON.stringify({ visitor_id: visitorId, content: textToSend }),
-        });
+        await integrationService.sendPublicMessage(embedUuid, convId, visitorId, textToSend);
       }
     } catch (err: any) {
       setPreviewSending(false);

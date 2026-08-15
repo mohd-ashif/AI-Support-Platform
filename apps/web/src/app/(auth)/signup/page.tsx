@@ -8,6 +8,9 @@ import { zodResolver } from "@/lib/zodResolver";
 import * as z from "zod";
 import { useDispatch } from "react-redux";
 import { setAuth } from "@/store/slices/authSlice";
+import { useSignupMutation } from "@/hooks/queries/useAuthQueries";
+import { authService } from "@/services/authService";
+import { useToast } from "@/components/ui/ToastProvider";
 import { apiFetch } from "@/lib/api";
 import { Loader2, AlertCircle, ArrowRight } from "lucide-react";
 
@@ -22,6 +25,9 @@ type SignupFormValues = z.infer<typeof signupSchema>;
 export default function SignupPage() {
   const router = useRouter();
   const dispatch = useDispatch();
+  const toast = useToast();
+  const signupMutation = useSignupMutation();
+
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
 
@@ -29,7 +35,7 @@ export default function SignupPage() {
     register,
     handleSubmit,
     watch,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<SignupFormValues>({
     resolver: zodResolver(signupSchema),
   });
@@ -50,10 +56,7 @@ export default function SignupPage() {
   const onSubmit = async (data: SignupFormValues) => {
     setErrorMessage(null);
     try {
-      const response = await apiFetch("/auth/register", {
-        method: "POST",
-        body: JSON.stringify(data),
-      });
+      const response = await signupMutation.mutateAsync(data);
 
       dispatch(
         setAuth({
@@ -62,6 +65,8 @@ export default function SignupPage() {
           workspaces: response.workspaces,
         })
       );
+
+      toast.success("Account created successfully!");
 
       const redirectUrl = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("redirect") : null;
       if (redirectUrl) {
@@ -72,7 +77,9 @@ export default function SignupPage() {
         router.push("/onboarding");
       }
     } catch (err: any) {
-      setErrorMessage(err.message || "Failed to create account. Please try again.");
+      const msg = err.message || "Failed to create account. Please try again.";
+      setErrorMessage(msg);
+      toast.error(msg);
     }
   };
 
@@ -80,14 +87,11 @@ export default function SignupPage() {
     setGoogleLoading(true);
     setErrorMessage(null);
     try {
-      const res = await apiFetch("/auth/google/url");
+      const res = await authService.getGoogleUrl();
       if (res?.url) {
         window.location.href = res.url;
       } else {
-        const demoRes = await apiFetch("/auth/google", {
-          method: "POST",
-          body: JSON.stringify({ code: "demo_signup_code" }),
-        });
+        const demoRes = await authService.googleAuth("demo_signup_code");
         dispatch(
           setAuth({
             user: demoRes.user,
@@ -95,16 +99,19 @@ export default function SignupPage() {
             workspaces: demoRes.workspaces,
           })
         );
+        toast.success("Google signup successful!");
         router.push(demoRes.workspaces?.length ? "/dashboard" : "/onboarding");
       }
     } catch (err: any) {
-      setErrorMessage(err.message || "Failed to initialize Google sign up.");
+      const msg = err.message || "Failed to initialize Google sign up.";
+      setErrorMessage(msg);
+      toast.error(msg);
       setGoogleLoading(false);
     }
   };
 
   return (
-    <div className="w-full space-y-6">
+    <div className="w-full space-y-6 animate-in fade-in duration-300">
       {/* Title Header */}
       <div className="space-y-2 text-center lg:text-left">
         <h2 className="text-3xl font-extrabold text-white tracking-tight">
@@ -127,7 +134,7 @@ export default function SignupPage() {
       <button
         type="button"
         onClick={handleGoogleSignup}
-        disabled={googleLoading || isSubmitting}
+        disabled={googleLoading || signupMutation.isPending}
         className="w-full flex items-center justify-center space-x-3 px-4 py-3 rounded-xl bg-[#111111] border border-[#222222] hover:border-[#D4AF37]/50 hover:bg-[#181818] text-white text-sm font-medium transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/40 disabled:opacity-60"
       >
         {googleLoading ? (
@@ -232,10 +239,10 @@ export default function SignupPage() {
 
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={signupMutation.isPending}
           className="w-full flex items-center justify-center space-x-2 py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#D4AF37] via-[#F4D03F] to-[#FFEAA7] hover:brightness-110 text-[#050505] font-bold text-sm shadow-lg shadow-[#D4AF37]/20 transition-all focus:outline-none focus:ring-2 focus:ring-[#D4AF37]/40 disabled:opacity-60"
         >
-          {isSubmitting ? (
+          {signupMutation.isPending ? (
             <Loader2 className="h-4 w-4 animate-spin text-[#050505]" />
           ) : (
             <>

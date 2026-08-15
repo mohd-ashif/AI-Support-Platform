@@ -98,7 +98,16 @@ export async function apiFetch<T = any>(endpoint: string, options: FetchOptions 
     credentials: "include",
   };
 
-  let response = await fetch(url, config);
+  let response: Response;
+  try {
+    response = await fetch(url, config);
+  } catch (err: any) {
+    throw new Error(
+      err?.message && !err.message.includes("Failed to fetch")
+        ? err.message
+        : `Unable to connect to backend server (${API_BASE_URL}). Please verify that the API server is running.`
+    );
+  }
 
   // Single-flight refresh token queue on 401 Unauthorized
   if (
@@ -112,7 +121,15 @@ export async function apiFetch<T = any>(endpoint: string, options: FetchOptions 
     if (newToken) {
       setMemoryAccessToken(newToken);
       headers["Authorization"] = `Bearer ${newToken}`;
-      response = await fetch(url, { ...config, headers });
+      try {
+        response = await fetch(url, { ...config, headers });
+      } catch (err: any) {
+        throw new Error(
+          err?.message && !err.message.includes("Failed to fetch")
+            ? err.message
+            : `Unable to connect to backend server (${API_BASE_URL}). Please verify that the API server is running.`
+        );
+      }
     } else {
       setMemoryAccessToken(null);
       if (

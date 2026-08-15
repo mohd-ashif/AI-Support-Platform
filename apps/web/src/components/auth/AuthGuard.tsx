@@ -6,6 +6,8 @@ import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "@/store";
 import { setAuth } from "@/store/slices/authSlice";
 import { apiFetch, getMemoryAccessToken, setMemoryAccessToken } from "@/lib/api";
+import { useCurrentUser } from "@/hooks/queries/useAuthQueries";
+import { useWorkspaces } from "@/hooks/queries/useWorkspaceQueries";
 import { NeuralNetworkLoader } from "@/components/ui/NeuralNetworkLoader";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
@@ -13,12 +15,12 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const dispatch = useDispatch();
   const { isAuthenticated, selectedWorkspace, workspaces } = useSelector((state: RootState) => state.auth);
-  
-  // Always derive activeWs from fresh workspaces array to prevent stale Redux object references
+
+  // Derive active workspace
   const currentWsId = selectedWorkspace?.id || selectedWorkspace?.workspace_id;
   const freshWs = Array.isArray(workspaces) && currentWsId ? workspaces.find((w: any) => (w.id || w.workspace_id) === currentWsId) : null;
   const activeWs = freshWs || selectedWorkspace || (workspaces && workspaces.length > 0 ? workspaces[0] : null);
-  
+
   const [mounted, setMounted] = useState(false);
   const [initializing, setInitializing] = useState(true);
 
@@ -82,8 +84,6 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
     checkSession();
   }, [dispatch, isAuthenticated, pathname]);
-
-  const redirectedRef = React.useRef<string | null>(null);
 
   useEffect(() => {
     if (!mounted || initializing || pathname.startsWith("/auth/callback")) return;

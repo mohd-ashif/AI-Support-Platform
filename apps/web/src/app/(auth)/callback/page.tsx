@@ -4,25 +4,24 @@ import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useDispatch } from "react-redux";
 import { setAuth, setAuthStatus } from "@/store/slices/authSlice";
-import { apiFetch } from "@/lib/api";
+import { authService } from "@/services/authService";
+import { workspaceService } from "@/services/workspaceService";
+import { useToast } from "@/components/ui/ToastProvider";
 import { Loader2, Bot } from "lucide-react";
 
 export default function AuthCallbackPage() {
   const router = useRouter();
   const dispatch = useDispatch();
+  const toast = useToast();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function bootstrapOAuthSession() {
       try {
-        const refreshData = await apiFetch("/auth/refresh", { method: "POST" });
+        const refreshData = await authService.refreshToken();
         if (refreshData?.access_token) {
-          const userRes = await apiFetch("/auth/me", {
-            headers: { Authorization: `Bearer ${refreshData.access_token}` },
-          });
-          const workspacesRes = await apiFetch("/workspaces", {
-            headers: { Authorization: `Bearer ${refreshData.access_token}` },
-          });
+          const userRes = await authService.getCurrentUser();
+          const workspacesRes = await workspaceService.getWorkspaces().catch(() => []);
 
           dispatch(
             setAuth({
@@ -31,6 +30,8 @@ export default function AuthCallbackPage() {
               workspaces: workspacesRes || [],
             })
           );
+
+          toast.success("Signed in successfully!");
 
           if (workspacesRes && workspacesRes.length > 0) {
             router.push("/dashboard");
@@ -42,17 +43,19 @@ export default function AuthCallbackPage() {
           router.push("/login");
         }
       } catch (err: any) {
-        setError(err.message || "Failed to complete Google sign in.");
+        const msg = err.message || "Failed to complete Google sign in.";
+        setError(msg);
+        toast.error(msg);
         dispatch(setAuthStatus("unauthenticated"));
         setTimeout(() => router.push("/login"), 2500);
       }
     }
 
     bootstrapOAuthSession();
-  }, [dispatch, router]);
+  }, [dispatch, router, toast]);
 
   return (
-    <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-6">
+    <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
       <div className="w-full max-w-sm bg-[#111111] border border-[#222222] rounded-2xl p-8 text-center space-y-6 shadow-2xl">
         <div className="mx-auto h-12 w-12 rounded-xl bg-gradient-to-tr from-[#D4AF37] via-[#F4D03F] to-[#FFEAA7] flex items-center justify-center shadow-lg shadow-[#D4AF37]/20">
           <Bot className="h-7 w-7 text-[#050505]" />

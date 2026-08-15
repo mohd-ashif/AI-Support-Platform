@@ -1,58 +1,51 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store";
-import { apiFetch } from "@/lib/api";
-import { Settings, Key, Plus, Trash2, Copy, Check, Eye, EyeOff, ShieldCheck } from "lucide-react";
+import {
+  useApiKeys,
+  useCreateApiKeyMutation,
+  useRevokeApiKeyMutation,
+} from "@/hooks/queries/useSettingsQueries";
+import { useToast } from "@/components/ui/ToastProvider";
+import { formatDate } from "@/lib/utils/format";
+import { TableSkeleton } from "@/components/ui/TableSkeleton";
+import { Settings, Key, Plus, Trash2, Copy, Check, ShieldCheck, Loader2 } from "lucide-react";
 
 export default function SettingsPage() {
-  const { selectedWorkspace } = useSelector((state: RootState) => state.auth);
-  const [apiKeys, setApiKeys] = useState<any[]>([]);
+  const toast = useToast();
+  const selectedWorkspace = useSelector((state: RootState) => state.auth.selectedWorkspace);
+  const activeWsId = selectedWorkspace?.id;
+
+  const { data: apiKeys = [], isLoading } = useApiKeys(activeWsId);
+  const createApiKeyMutation = useCreateApiKeyMutation(activeWsId);
+  const revokeApiKeyMutation = useRevokeApiKeyMutation(activeWsId);
+
   const [newKeyLabel, setNewKeyLabel] = useState("");
   const [createdRawKey, setCreatedRawKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    fetchApiKeys();
-  }, [selectedWorkspace]);
-
-  const fetchApiKeys = async () => {
-    try {
-      const data = await apiFetch("/settings/api-keys");
-      setApiKeys(data || []);
-    } catch (e) {
-      setApiKeys([]);
-    }
-  };
 
   const handleCreateKey = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newKeyLabel.trim()) return;
-    setLoading(true);
+    if (!newKeyLabel.trim() || createApiKeyMutation.isPending) return;
+
     try {
-      const res = await apiFetch("/settings/api-keys", {
-        method: "POST",
-        body: JSON.stringify({ label: newKeyLabel.trim() }),
-      });
+      const res = await createApiKeyMutation.mutateAsync({ label: newKeyLabel.trim() });
       setCreatedRawKey(res.raw_key);
       setNewKeyLabel("");
-      fetchApiKeys();
+      toast.success("New developer API key generated successfully.");
     } catch (err: any) {
-      alert(err.message || "Failed to create API key.");
-    } finally {
-      setLoading(false);
+      toast.error(err.message || "Failed to create API key.");
     }
   };
 
   const handleRevokeKey = async (keyId: string) => {
-    if (!confirm("Are you sure you want to revoke this API key? This action cannot be undone.")) return;
     try {
-      await apiFetch(`/settings/api-keys/${keyId}`, { method: "DELETE" });
-      fetchApiKeys();
+      await revokeApiKeyMutation.mutateAsync(keyId);
+      toast.success("API key revoked successfully.");
     } catch (err: any) {
-      alert(err.message || "Failed to revoke API key.");
+      toast.error(err.message || "Failed to revoke API key.");
     }
   };
 
@@ -60,6 +53,7 @@ export default function SettingsPage() {
     if (!createdRawKey) return;
     navigator.clipboard.writeText(createdRawKey);
     setCopied(true);
+    toast.success("Secret API key copied to clipboard!");
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -131,70 +125,80 @@ export default function SettingsPage() {
           />
           <button
             type="submit"
-            disabled={loading || !newKeyLabel.trim()}
+            disabled={createApiKeyMutation.isPending || !newKeyLabel.trim()}
             className="px-4 py-2.5 rounded-xl bg-[#D4AF37] text-black font-bold text-xs hover:brightness-110 disabled:opacity-50 flex items-center space-x-1.5 shrink-0"
           >
-            <Plus className="h-4 w-4" />
+            {createApiKeyMutation.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin text-black" />
+            ) : (
+              <Plus className="h-4 w-4" />
+            )}
             <span>Generate New Key</span>
           </button>
         </form>
 
         {/* Existing API Keys Table */}
         <div className="pt-2 overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="text-neutral-500 border-b border-[#1A1A1A]">
-                <th className="pb-3 font-semibold">Label</th>
-                <th className="pb-3 font-semibold">Key Prefix</th>
-                <th className="pb-3 font-semibold">Created At</th>
-                <th className="pb-3 font-semibold">Status</th>
-                <th className="pb-3 font-semibold text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[#1A1A1A]">
-              {apiKeys.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="py-6 text-center text-neutral-500">
-                    No active API keys found. Generate a key above to access the Developer API.
-                  </td>
+          {isLoading ? (
+            <table className="w-full text-left text-xs">
+              <TableSkeleton rows={3} columns={5} />
+            </table>
+          ) : (
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="text-neutral-500 border-b border-[#1A1A1A]">
+                  <th className="pb-3 font-semibold">Label</th>
+                  <th className="pb-3 font-semibold">Key Prefix</th>
+                  <th className="pb-3 font-semibold">Created At</th>
+                  <th className="pb-3 font-semibold">Status</th>
+                  <th className="pb-3 font-semibold text-right">Action</th>
                 </tr>
-              ) : (
-                apiKeys.map((key) => (
-                  <tr key={key.id} className="hover:bg-[#141414] transition-colors">
-                    <td className="py-3 font-semibold text-white">{key.label}</td>
-                    <td className="py-3 font-mono text-[#D4AF37]">{key.key_prefix}</td>
-                    <td className="py-3 text-neutral-400">{key.created_at ? new Date(key.created_at).toLocaleDateString() : "-"}</td>
-                    <td className="py-3">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
-                          key.revoked
-                            ? "bg-red-500/10 text-red-400 border border-red-500/20"
-                            : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                        }`}
-                      >
-                        {key.revoked ? "Revoked" : "Active"}
-                      </span>
-                    </td>
-                    <td className="py-3 text-right">
-                      {!key.revoked && (
-                        <button
-                          type="button"
-                          onClick={() => handleRevokeKey(key.id)}
-                          className="p-1.5 rounded-lg text-neutral-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                          title="Revoke Key"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      )}
+              </thead>
+              <tbody className="divide-y divide-[#1A1A1A]">
+                {apiKeys.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-6 text-center text-neutral-500">
+                      No active API keys found. Generate a key above to access the Developer API.
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  apiKeys.map((key) => (
+                    <tr key={key.id} className="hover:bg-[#141414] transition-colors">
+                      <td className="py-3 font-semibold text-white">{key.label}</td>
+                      <td className="py-3 font-mono text-[#D4AF37]">{key.key_prefix}</td>
+                      <td className="py-3 text-neutral-400">{formatDate(key.created_at)}</td>
+                      <td className="py-3">
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
+                            key.revoked
+                              ? "bg-red-500/10 text-red-400 border border-red-500/20"
+                              : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                          }`}
+                        >
+                          {key.revoked ? "Revoked" : "Active"}
+                        </span>
+                      </td>
+                      <td className="py-3 text-right">
+                        {!key.revoked && (
+                          <button
+                            type="button"
+                            onClick={() => handleRevokeKey(key.id)}
+                            disabled={revokeApiKeyMutation.isPending}
+                            className="p-1.5 rounded-lg text-neutral-400 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                            title="Revoke Key"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>
   );
 }
-

@@ -1,121 +1,82 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { useSelector, useDispatch } from "react-redux";
+import React, { useState } from "react";
+import { useSelector } from "react-redux";
 import { RootState } from "@/store";
-import { apiFetch } from "@/lib/api";
 import {
-  setFileSourcesLoading,
-  setFileSourcesSuccess,
-  setFileSourcesError,
-  addFileSource,
-  removeFileSource,
-} from "@/store/slices/sourcesSlice";
-import { FileText, Upload, Trash2, CheckCircle2, Clock, XCircle, AlertCircle, File, HelpCircle, Loader2 } from "lucide-react";
+  useFileSources,
+  useWebSources,
+  useUploadFileSourceMutation,
+  useDeleteFileSourceMutation,
+} from "@/hooks/queries/useSourcesQueries";
+import { useToast } from "@/components/ui/ToastProvider";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { Modal } from "@/components/ui/Modal";
+import { TableSkeleton } from "@/components/ui/TableSkeleton";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { formatBytes } from "@/lib/utils/format";
+import { FileText, Upload, Trash2, AlertCircle, File, HelpCircle, Loader2 } from "lucide-react";
 
 export default function DataImporterPage() {
-  const dispatch = useDispatch();
-  const { selectedWorkspace, workspaces } = useSelector((state: RootState) => state.auth);
-  const fileState = useSelector((state: RootState) => state.sources.files);
-  const webState = useSelector((state: RootState) => state.sources.web);
-  const activeWs = selectedWorkspace || (workspaces && workspaces.length > 0 ? workspaces[0] : null);
+  const toast = useToast();
+  const selectedWorkspace = useSelector((state: RootState) => state.auth.selectedWorkspace);
+  const workspaces = useSelector((state: RootState) => state.auth.workspaces || []);
+  const activeWs = selectedWorkspace || (workspaces.length > 0 ? workspaces[0] : null);
+  const activeWsId = activeWs?.id;
 
-  const [uploading, setUploading] = useState(false);
+  const { data: files = [], isLoading } = useFileSources(activeWsId);
+  const { data: webSources = [] } = useWebSources(activeWsId);
+
+  const uploadMutation = useUploadFileSourceMutation(activeWsId);
+  const deleteMutation = useDeleteFileSourceMutation(activeWsId);
+
   const [error, setError] = useState<string | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   const planLimit = activeWs?.plan_id === "plan_pro" ? 20 : activeWs?.plan_id === "plan_business" ? "Unlimited" : 5;
 
-  const fetchSources = async (force: boolean = false) => {
-    if (!activeWs?.id) return;
-
-    if (!force && fileState.status === "success" && fileState.items.length > 0) {
-      return;
-    }
-
-    try {
-      if (fileState.status === "idle") {
-        dispatch(setFileSourcesLoading());
-      }
-      const fileData = await apiFetch("/sources/files", {
-        headers: { "X-Workspace-Id": activeWs.id },
-      });
-      dispatch(setFileSourcesSuccess({ items: fileData || [] }));
-    } catch (err: any) {
-      dispatch(setFileSourcesError(err.message || "Failed to fetch file sources"));
-    }
-  };
-
-  useEffect(() => {
-    fetchSources(false);
-  }, [activeWs?.id]);
-
-  useEffect(() => {
-    const hasInProgress = fileState.items.some((f) => f.status === "pending" || f.status === "processing");
-    if (!hasInProgress) return;
-
-    const timer = setInterval(() => {
-      fetchSources(true);
-    }, 3000);
-
-    return () => clearInterval(timer);
-  }, [fileState.items, activeWs?.id]);
-
   const handleFileUpload = async (selectedFile: File) => {
     setError(null);
 
-    // Client-side defense-in-depth checks
-    if (selectedFile.size > 5 * 1024 * 1024) {
-      setError("File size exceeds 5MB limit.");
+    if (selectedFile.size > 25 * 1024 * 1024) {
+      const msg = "File size exceeds 25MB limit.";
+      setError(msg);
+      toast.error(msg);
       return;
     }
 
     const ext = selectedFile.name.split(".").pop()?.toLowerCase();
-    if (!["pdf", "csv", "txt"].includes(ext || "")) {
-      setError("Unsupported file format. Please upload .pdf, .csv, or .txt files.");
+    if (!["pdf", "csv", "txt", "docx"].includes(ext || "")) {
+      const msg = "Unsupported file format. Please upload .pdf, .csv, .docx, or .txt files.";
+      setError(msg);
+      toast.error(msg);
       return;
     }
 
-    setUploading(true);
     try {
-      const formData = new FormData();
-      formData.append("file", selectedFile);
-
-      const createdFile = await apiFetch("/sources/files", {
-        method: "POST",
-        headers: { "X-Workspace-Id": activeWs?.id },
-        body: formData,
-      });
-
-      // Optimistically update Redux state directly
-      dispatch(addFileSource(createdFile));
+      await uploadMutation.mutateAsync(selectedFile);
+      toast.success(`Successfully uploaded and indexed ${selectedFile.name}`);
     } catch (err: any) {
-      setError(err.message || "Failed to upload document file.");
-    } finally {
-      setUploading(false);
+      const msg = err.message || "Failed to upload document file.";
+      setError(msg);
+      toast.error(msg);
     }
   };
 
   const handleDelete = async (sourceId: string) => {
     try {
-      await apiFetch(`/sources/files/${sourceId}`, {
-        method: "DELETE",
-        headers: { "X-Workspace-Id": activeWs?.id },
-      });
+      await deleteMutation.mutateAsync(sourceId);
       setDeleteTargetId(null);
-      // Optimistically update Redux state directly
-      dispatch(removeFileSource(sourceId));
+      toast.success("Document file source deleted successfully.");
     } catch (err: any) {
-      setError(err.message || "Failed to delete file source.");
+      toast.error(err.message || "Failed to delete file source.");
     }
   };
 
-  const files = fileState.items;
-  const webCount = webState.items.length;
-  const totalUsed = files.length + webCount;
+  const totalUsed = files.length + webSources.length;
 
   return (
-    <div className="p-8 bg-[#050505] min-h-screen text-white space-y-8">
+    <div className="p-8 bg-[#050505] min-h-screen text-white space-y-8 animate-in fade-in duration-300">
       {/* Header */}
       <div className="space-y-1">
         <h1 className="text-2xl font-extrabold flex items-center space-x-2">
@@ -148,20 +109,22 @@ export default function DataImporterPage() {
           <label className="border-2 border-dashed border-[#262626] hover:border-[#D4AF37] transition-all rounded-2xl p-8 text-center cursor-pointer bg-[#080808] flex flex-col items-center justify-center space-y-3 group">
             <input
               type="file"
-              accept=".pdf,.csv,.txt"
+              accept=".pdf,.csv,.txt,.docx"
               className="hidden"
               onChange={(e) => {
                 if (e.target.files?.[0]) handleFileUpload(e.target.files[0]);
               }}
             />
-            {uploading ? (
+            {uploadMutation.isPending ? (
               <Loader2 className="h-10 w-10 animate-spin text-[#D4AF37]" />
             ) : (
               <Upload className="h-10 w-10 text-neutral-500 group-hover:text-[#D4AF37] transition-colors" />
             )}
             <div className="space-y-1">
-              <p className="text-xs font-bold text-neutral-200">Drag and drop document file here</p>
-              <p className="text-[11px] text-neutral-500">Accepted file types: .pdf, .csv, .txt • Max 5MB</p>
+              <p className="text-xs font-bold text-neutral-200">
+                {uploadMutation.isPending ? "Extracting Text & Generating Embeddings..." : "Drag and drop document file here"}
+              </p>
+              <p className="text-[11px] text-neutral-500">Accepted file types: .pdf, .csv, .txt, .docx • Max 25MB</p>
             </div>
           </label>
         </div>
@@ -203,100 +166,75 @@ export default function DataImporterPage() {
                 <th className="p-4 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#1F1F1F]">
-              {fileState.status === "loading" && files.length === 0 ? (
+            {isLoading && files.length === 0 ? (
+              <TableSkeleton columns={4} rows={3} />
+            ) : files.length === 0 ? (
+              <tbody>
                 <tr>
-                  <td colSpan={4} className="p-8 text-center text-neutral-500">
-                    <Loader2 className="h-5 w-5 animate-spin mx-auto text-[#D4AF37] mb-2" />
-                    Loading document files from cache / API...
+                  <td colSpan={4}>
+                    <EmptyState
+                      icon={FileText}
+                      title="No document files imported yet"
+                      description="Drag and drop a PDF, CSV, or TXT file above to train your AI agent."
+                    />
                   </td>
                 </tr>
-              ) : files.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="p-8 text-center text-neutral-500">
-                    No document files imported yet. Drag and drop a file above to begin.
-                  </td>
-                </tr>
-              ) : (
-                files.map((file) => {
-                  const isReady = file.status === "ready";
-                  const isFailed = file.status === "failed";
-
-                  return (
-                    <tr key={file.id} className="hover:bg-[#161616]/50 transition-colors">
-                      <td className="p-4 font-semibold text-white flex items-center space-x-2">
-                        <File className="h-4 w-4 text-[#D4AF37]" />
-                        <span className="truncate max-w-xs">{file.filename}</span>
-                      </td>
-                      <td className="p-4 font-mono text-neutral-400">
-                        {(file.file_size_bytes / 1024).toFixed(1)} KB
-                      </td>
-                      <td className="p-4">
-                        {isReady && (
-                          <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-bold text-[10px] flex items-center space-x-1.5 w-fit">
-                            <CheckCircle2 className="h-3 w-3" />
-                            <span>Ready</span>
-                          </span>
-                        )}
-                        {isFailed && (
-                          <span className="px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 font-bold text-[10px] flex items-center space-x-1.5 w-fit" title={file.error_message || ""}>
-                            <XCircle className="h-3 w-3" />
-                            <span>Failed</span>
-                          </span>
-                        )}
-                        {!isReady && !isFailed && (
-                          <span className="px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 font-bold text-[10px] flex items-center space-x-1.5 w-fit">
-                            <Clock className="h-3 w-3 animate-spin" />
-                            <span className="capitalize">{file.status}...</span>
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-4 text-right">
-                        <button
-                          onClick={() => setDeleteTargetId(file.id)}
-                          className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
-                          title="Delete File"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
+              </tbody>
+            ) : (
+              <tbody className="divide-y divide-[#1F1F1F]">
+                {files.map((file) => (
+                  <tr key={file.id} className="hover:bg-[#161616]/50 transition-colors">
+                    <td className="p-4 font-semibold text-white flex items-center space-x-2">
+                      <File className="h-4 w-4 text-[#D4AF37]" />
+                      <span className="truncate max-w-xs">{file.filename}</span>
+                    </td>
+                    <td className="p-4 font-mono text-neutral-400">{formatBytes(file.file_size_bytes)}</td>
+                    <td className="p-4">
+                      <StatusBadge status={file.status} title={file.error_message || undefined} />
+                    </td>
+                    <td className="p-4 text-right">
+                      <button
+                        onClick={() => setDeleteTargetId(file.id)}
+                        disabled={deleteMutation.isPending}
+                        className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors disabled:opacity-50"
+                        title="Delete File"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            )}
           </table>
         </div>
       </div>
 
       {/* Delete Modal */}
-      {deleteTargetId && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-          <div className="bg-[#111111] border border-[#222222] rounded-2xl p-6 max-w-sm w-full space-y-4 text-center">
-            <AlertCircle className="h-8 w-8 text-red-400 mx-auto" />
-            <div className="space-y-1">
-              <h4 className="text-base font-extrabold text-white">Delete Document Source?</h4>
-              <p className="text-xs text-neutral-400">
-                This will permanently remove the file source and its knowledge chunks from your agent's memory.
-              </p>
-            </div>
-            <div className="flex space-x-3 pt-2">
-              <button
-                onClick={() => setDeleteTargetId(null)}
-                className="flex-1 py-2 rounded-xl bg-[#1C1C1C] text-neutral-300 font-bold text-xs hover:bg-[#252525]"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => handleDelete(deleteTargetId)}
-                className="flex-1 py-2 rounded-xl bg-red-500 text-white font-extrabold text-xs hover:bg-red-600"
-              >
-                Confirm Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Modal
+        isOpen={Boolean(deleteTargetId)}
+        onClose={() => setDeleteTargetId(null)}
+        title="Delete Document Source?"
+        description="This will permanently remove the file source and its knowledge chunks from your agent's memory."
+        icon={AlertCircle}
+        footer={
+          <>
+            <button
+              onClick={() => setDeleteTargetId(null)}
+              className="flex-1 py-2 rounded-xl bg-[#1C1C1C] text-neutral-300 font-bold text-xs hover:bg-[#252525]"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => deleteTargetId && handleDelete(deleteTargetId)}
+              disabled={deleteMutation.isPending}
+              className="flex-1 py-2 rounded-xl bg-red-500 text-white font-extrabold text-xs hover:bg-red-600 disabled:opacity-50"
+            >
+              Confirm Delete
+            </button>
+          </>
+        }
+      />
     </div>
   );
 }

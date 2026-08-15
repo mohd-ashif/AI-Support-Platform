@@ -1,109 +1,81 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useRef } from "react";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store";
-import { apiFetch } from "@/lib/api";
+import {
+  useWebSources,
+  useFileSources,
+  useCrawlWebSourceMutation,
+  useUploadFileSourceMutation,
+  useDeleteWebSourceMutation,
+  useDeleteFileSourceMutation,
+} from "@/hooks/queries/useSourcesQueries";
+import { useToast } from "@/components/ui/ToastProvider";
+import { formatBytes } from "@/lib/utils/format";
 import { BookOpen, Globe, FileText, Upload, Sparkles, CheckCircle2, Trash2, Loader2, RefreshCw } from "lucide-react";
 
 export default function KnowledgeBasePage() {
-  const { selectedWorkspace } = useSelector((state: RootState) => state.auth);
-  const [webSources, setWebSources] = useState<any[]>([]);
-  const [fileSources, setFileSources] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [crawling, setCrawling] = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const toast = useToast();
+  const selectedWorkspace = useSelector((state: RootState) => state.auth.selectedWorkspace);
+  const activeWsId = selectedWorkspace?.id;
+
+  const { data: webSources = [], isLoading: loadingWeb, refetch: refetchWeb } = useWebSources(activeWsId);
+  const { data: fileSources = [], isLoading: loadingFiles, refetch: refetchFiles } = useFileSources(activeWsId);
+
+  const crawlMutation = useCrawlWebSourceMutation(activeWsId);
+  const uploadMutation = useUploadFileSourceMutation(activeWsId);
+  const deleteWebMutation = useDeleteWebSourceMutation(activeWsId);
+  const deleteFileMutation = useDeleteFileSourceMutation(activeWsId);
+
   const [urlInput, setUrlInput] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    fetchSources();
-  }, [selectedWorkspace]);
-
-  const fetchSources = async () => {
-    try {
-      const [webRes, fileRes] = await Promise.all([
-        apiFetch("/sources/web").catch(() => []),
-        apiFetch("/sources/files").catch(() => []),
-      ]);
-      setWebSources(webRes || []);
-      setFileSources(fileRes || []);
-    } catch (e) {
-      // Fallback
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  const loading = loadingWeb || loadingFiles;
 
   const handleStartCrawl = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!urlInput.trim() || crawling) return;
-    setCrawling(true);
+    if (!urlInput.trim() || crawlMutation.isPending) return;
+
     try {
-      await apiFetch("/sources/web", {
-        method: "POST",
-        body: JSON.stringify({ url: urlInput.trim() }),
-      });
+      await crawlMutation.mutateAsync(urlInput.trim());
       setUrlInput("");
-      fetchSources();
+      toast.success("Website crawling & vector indexing started!");
     } catch (err: any) {
-      alert(err.message || "Failed to start website crawl.");
-    } finally {
-      setCrawling(false);
+      toast.error(err.message || "Failed to start website crawl.");
     }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    setUploading(true);
 
     try {
-      const formData = new FormData();
-      formData.append("file", files[0]);
-
-      // Direct fetch for multipart formData uploading
-      const api = await import("@/lib/api");
-      const token = api.getMemoryAccessToken();
-      const wsId = api.getMemoryWorkspaceId() || selectedWorkspace?.id || "";
-
-      const res = await fetch("http://localhost:8000/sources/files", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "X-Workspace-Id": wsId,
-        },
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.detail || "File upload failed.");
-      }
-
-      fetchSources();
+      await uploadMutation.mutateAsync(files[0]);
+      toast.success(`Successfully uploaded and indexed ${files[0].name}`);
     } catch (err: any) {
-      alert(err.message || "Failed to upload file document.");
+      toast.error(err.message || "Failed to upload file document.");
     } finally {
-      setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
   const handleDeleteSource = async (id: string, type: "web" | "file") => {
-    if (!confirm("Are you sure you want to delete this knowledge source and remove its vector embeddings?")) return;
     try {
-      await apiFetch(`/sources/${type === "web" ? "web" : "files"}/${id}`, { method: "DELETE" });
-      fetchSources();
+      if (type === "web") {
+        await deleteWebMutation.mutateAsync(id);
+      } else {
+        await deleteFileMutation.mutateAsync(id);
+      }
+      toast.success("Knowledge source deleted successfully.");
     } catch (err: any) {
-      alert(err.message || "Failed to delete source.");
+      toast.error(err.message || "Failed to delete source.");
     }
   };
 
   const allSources = [
-    ...webSources.map((s) => ({ ...s, type: "web", name: s.url, info: `${s.page_count || 0} pages indexed` })),
-    ...fileSources.map((s) => ({ ...s, type: "file", name: s.filename, info: `${((s.file_size_bytes || 0) / 1024).toFixed(1)} KB` })),
+    ...webSources.map((s) => ({ ...s, type: "web" as const, name: s.url, info: `${s.page_count || 0} pages indexed` })),
+    ...fileSources.map((s) => ({ ...s, type: "file" as const, name: s.filename, info: formatBytes(s.file_size_bytes || 0) })),
   ];
 
   return (
@@ -139,10 +111,10 @@ export default function KnowledgeBasePage() {
             />
             <button
               type="submit"
-              disabled={crawling || !urlInput.trim()}
+              disabled={crawlMutation.isPending || !urlInput.trim()}
               className="w-full py-2.5 rounded-xl bg-[#D4AF37] text-black font-bold text-xs hover:brightness-110 disabled:opacity-50 transition-all flex items-center justify-center space-x-2"
             >
-              {crawling ? (
+              {crawlMutation.isPending ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin text-black" />
                   <span>Crawling & Indexing Pages...</span>
@@ -179,13 +151,13 @@ export default function KnowledgeBasePage() {
             onClick={() => fileInputRef.current?.click()}
             className="border-2 border-dashed border-[#222222] hover:border-[#D4AF37]/50 rounded-xl p-6 text-center cursor-pointer transition-colors space-y-2 bg-[#050505]"
           >
-            {uploading ? (
+            {uploadMutation.isPending ? (
               <Loader2 className="h-6 w-6 text-[#D4AF37] mx-auto animate-spin" />
             ) : (
               <Upload className="h-6 w-6 text-[#D4AF37] mx-auto" />
             )}
             <p className="text-xs text-neutral-300 font-semibold">
-              {uploading ? "Extracting Text & Generating Embeddings..." : "Click to select PDF or text files"}
+              {uploadMutation.isPending ? "Extracting Text & Generating Embeddings..." : "Click to select PDF or text files"}
             </p>
             <p className="text-[10px] text-neutral-500">Supports PDF, CSV, TXT files up to 25MB</p>
           </div>
@@ -198,7 +170,10 @@ export default function KnowledgeBasePage() {
           <h3 className="text-sm font-bold text-white">Active Knowledge Sources</h3>
           <button
             type="button"
-            onClick={fetchSources}
+            onClick={() => {
+              refetchWeb();
+              refetchFiles();
+            }}
             className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-[#1A1A1A] transition-colors"
             title="Refresh List"
           >
@@ -255,7 +230,8 @@ export default function KnowledgeBasePage() {
                       <button
                         type="button"
                         onClick={() => handleDeleteSource(s.id, s.type)}
-                        className="p-1.5 rounded-lg text-neutral-400 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        disabled={deleteWebMutation.isPending || deleteFileMutation.isPending}
+                        className="p-1.5 rounded-lg text-neutral-400 hover:text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
                         title="Delete Source & Vectors"
                       >
                         <Trash2 className="h-4 w-4" />
@@ -271,4 +247,3 @@ export default function KnowledgeBasePage() {
     </div>
   );
 }
-

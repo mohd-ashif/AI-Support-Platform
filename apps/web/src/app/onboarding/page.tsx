@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useDispatch, useSelector } from "react-redux";
 import { setWorkspaces, setSelectedWorkspace } from "@/store/slices/authSlice";
 import { RootState } from "@/store";
-import { apiFetch } from "@/lib/api";
+import { useSetupWorkspaceMutation, useWorkspaces } from "@/hooks/queries/useWorkspaceQueries";
+import { useToast } from "@/components/ui/ToastProvider";
 import {
   Bot,
   Building2,
@@ -25,10 +26,13 @@ import {
 export default function OnboardingPage() {
   const router = useRouter();
   const dispatch = useDispatch();
+  const toast = useToast();
   const { user } = useSelector((state: RootState) => state.auth);
 
+  const setupMutation = useSetupWorkspaceMutation();
+  const { refetch: refetchWorkspaces } = useWorkspaces(false);
+
   const [step, setStep] = useState<1 | 2 | 3>(1);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Form State
@@ -61,33 +65,28 @@ export default function OnboardingPage() {
       return;
     }
 
-    setLoading(true);
     setError(null);
     try {
-      const response = await apiFetch("/workspaces/setup", {
-        method: "POST",
-        body: JSON.stringify({
-          name: formData.name,
-          website_url: formData.website_url,
-          industry: formData.industry,
-          brand_name: formData.brand_name || formData.name,
-          primary_color: formData.primary_color,
-          greeting_message: formData.greeting_message,
-          plan_name: formData.plan_name,
-        }),
+      await setupMutation.mutateAsync({
+        business_name: formData.name,
+        website_url: formData.website_url,
+        industry: formData.industry,
       });
 
-      // Update Redux state with new workspace
-      const allWorkspaces = await apiFetch("/workspaces");
-      dispatch(setWorkspaces(allWorkspaces));
-      if (allWorkspaces && allWorkspaces.length > 0) {
-        dispatch(setSelectedWorkspace(allWorkspaces[0]));
+      const { data: freshWorkspaces } = await refetchWorkspaces();
+      if (freshWorkspaces) {
+        dispatch(setWorkspaces(freshWorkspaces));
+        if (freshWorkspaces.length > 0) {
+          dispatch(setSelectedWorkspace(freshWorkspaces[0]));
+        }
       }
 
+      toast.success("Workspace setup completed successfully!");
       router.push("/dashboard");
     } catch (err: any) {
-      setError(err.message || "Failed to create workspace. Please try again.");
-      setLoading(false);
+      const msg = err.message || "Failed to create workspace. Please try again.";
+      setError(msg);
+      toast.error(msg);
     }
   };
 
@@ -492,7 +491,7 @@ export default function OnboardingPage() {
               <button
                 type="button"
                 onClick={() => setStep(2)}
-                disabled={loading}
+                disabled={setupMutation.isPending}
                 className="flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 rounded-xl bg-[#1A1A1A] hover:bg-[#222222] text-neutral-300 font-semibold text-sm transition-all border border-[#2A2A2A] disabled:opacity-50"
               >
                 <ArrowLeft className="h-4 w-4" />
@@ -501,10 +500,10 @@ export default function OnboardingPage() {
               <button
                 type="button"
                 onClick={handleCompleteOnboarding}
-                disabled={loading}
+                disabled={setupMutation.isPending}
                 className="flex-1 flex items-center justify-center space-x-2 py-3.5 px-4 rounded-xl bg-gradient-to-r from-[#D4AF37] via-[#F4D03F] to-[#FFEAA7] text-[#050505] font-bold text-sm hover:brightness-110 transition-all shadow-lg shadow-[#D4AF37]/20 disabled:opacity-60"
               >
-                {loading ? (
+                {setupMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin text-[#050505]" />
                 ) : (
                   <>

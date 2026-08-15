@@ -1,9 +1,13 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import { useSelector } from "react-redux";
 import { RootState } from "@/store";
 import { useSubscription, usePlans, useCheckoutMutation } from "@/lib/queries/billing";
+import { StatusBadge } from "@/components/ui/StatusBadge";
+import { Modal } from "@/components/ui/Modal";
+import { formatCurrency, formatDate, formatNumber } from "@/lib/utils/format";
+import { useToast } from "@/components/ui/ToastProvider";
 import {
   CreditCard,
   CheckCircle2,
@@ -16,12 +20,12 @@ import {
   Calendar,
   Users,
   MessageSquare,
-  ArrowUpRight,
   RefreshCw,
 } from "lucide-react";
 
 export default function BillingPage() {
-  const { selectedWorkspace } = useSelector((state: RootState) => state.auth);
+  const toast = useToast();
+  const selectedWorkspace = useSelector((state: RootState) => state.auth.selectedWorkspace);
   const workspaceId = selectedWorkspace?.id;
 
   const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
@@ -31,20 +35,13 @@ export default function BillingPage() {
     data: sub,
     isLoading: isSubLoading,
     isError: isSubError,
-    error: subError,
     refetch: refetchSub,
   } = useSubscription(workspaceId);
 
   const { data: plans, isLoading: isPlansLoading } = usePlans();
   const checkoutMutation = useCheckoutMutation(workspaceId);
 
-  React.useEffect(() => {
-    if (sub) {
-      console.log("Subscription Response:", sub);
-    }
-  }, [sub]);
-
-  const handleCheckout = React.useCallback(
+  const handleCheckout = useCallback(
     async (planId: string) => {
       if (!workspaceId) {
         setActionError("Workspace not selected.");
@@ -59,57 +56,21 @@ export default function BillingPage() {
           billing_cycle: billingCycle,
         });
 
-        if (res?.redirect) {
-          window.location.href = res.redirect;
+        const redirectUrl = res?.url || res?.checkout_url;
+        if (redirectUrl) {
+          toast.success("Redirecting to secure Stripe checkout...");
+          window.location.href = redirectUrl;
         }
       } catch (err: any) {
-        setActionError(err.message || "Failed to initiate subscription checkout.");
+        const msg = err.message || "Failed to initiate subscription checkout.";
+        setActionError(msg);
+        toast.error(msg);
       }
     },
-    [workspaceId, billingCycle, checkoutMutation]
+    [workspaceId, billingCycle, checkoutMutation, toast]
   );
 
-  const getStatusBadge = React.useCallback((status?: string) => {
-    switch (status?.toLowerCase()) {
-      case "active":
-        return (
-          <span className="px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs font-bold uppercase tracking-wider flex items-center space-x-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Active</span>
-          </span>
-        );
-      case "trialing":
-        return (
-          <span className="px-3 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/30 text-xs font-bold uppercase tracking-wider flex items-center space-x-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-            <span>Free Trial</span>
-          </span>
-        );
-      case "past_due":
-        return (
-          <span className="px-3 py-1 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 text-xs font-bold uppercase tracking-wider flex items-center space-x-1.5">
-            <AlertTriangle className="h-3.5 w-3.5" />
-            <span>Payment Past Due</span>
-          </span>
-        );
-      case "canceled":
-      case "cancelled":
-        return (
-          <span className="px-3 py-1 rounded-full bg-red-500/10 text-red-400 border border-red-500/30 text-xs font-bold uppercase tracking-wider">
-            Canceled
-          </span>
-        );
-      default:
-        return (
-          <span className="px-3 py-1 rounded-full bg-neutral-800 text-neutral-300 border border-neutral-700 text-xs font-bold uppercase tracking-wider">
-            {status || "Active"}
-          </span>
-        );
-    }
-  }, []);
-
-  // Memoized Usage meter calculations
-  const metrics = React.useMemo(() => {
+  const metrics = useMemo(() => {
     const msgUsed = sub?.messages_used ?? 0;
     const msgLimit = sub?.messages_limit ?? 100;
     const msgPercent = msgLimit === -1 ? 0 : Math.min(100, Math.round((msgUsed / (msgLimit || 1)) * 100));
@@ -118,13 +79,7 @@ export default function BillingPage() {
     const seatsLimit = sub?.seat_limit ?? 1;
     const seatsPercent = seatsLimit === -1 ? 0 : Math.min(100, Math.round((seatsUsed / (seatsLimit || 1)) * 100));
 
-    const formattedPeriodEnd = sub?.current_period_end
-      ? new Date(sub.current_period_end).toLocaleDateString(undefined, {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-        })
-      : null;
+    const formattedPeriodEnd = formatDate(sub?.current_period_end);
 
     return { msgUsed, msgLimit, msgPercent, seatsUsed, seatsLimit, seatsPercent, formattedPeriodEnd };
   }, [sub]);
@@ -214,7 +169,7 @@ export default function BillingPage() {
               )}
             </div>
 
-            {getStatusBadge(sub?.status)}
+            <StatusBadge status={sub?.status || "active"} />
           </div>
 
           {/* Meter Cards */}
@@ -227,7 +182,7 @@ export default function BillingPage() {
                   <span>Monthly AI Messages</span>
                 </span>
                 <span className="text-white font-extrabold">
-                  {metrics.msgUsed.toLocaleString()} / {metrics.msgLimit === -1 ? "Unlimited" : metrics.msgLimit.toLocaleString()}
+                  {formatNumber(metrics.msgUsed)} / {metrics.msgLimit === -1 ? "Unlimited" : formatNumber(metrics.msgLimit)}
                 </span>
               </div>
               <div className="w-full h-2 bg-[#1A1A1A] rounded-full overflow-hidden">
@@ -238,73 +193,58 @@ export default function BillingPage() {
                   style={{ width: metrics.msgLimit === -1 ? "100%" : `${metrics.msgPercent}%` }}
                 />
               </div>
-              {metrics.msgLimit !== -1 && (
-                <p className="text-[10px] text-neutral-500 text-right font-bold">
-                  {metrics.msgPercent}% quota consumed
-                </p>
-              )}
             </div>
 
-            {/* Operator Seats Meter */}
+            {/* Team Seats Meter */}
             <div className="bg-[#050505] border border-[#222222] rounded-xl p-5 space-y-3">
               <div className="flex justify-between items-center text-xs">
                 <span className="text-neutral-400 font-semibold flex items-center space-x-1.5">
                   <Users className="h-4 w-4 text-[#D4AF37]" />
-                  <span>Seat License Quota</span>
+                  <span>Operator Team Seats</span>
                 </span>
                 <span className="text-white font-extrabold">
-                  {metrics.seatsUsed} / {metrics.seatsLimit === -1 ? "Unlimited" : `${metrics.seatsLimit} Seats`}
+                  {metrics.seatsUsed} / {metrics.seatsLimit === -1 ? "Unlimited" : metrics.seatsLimit}
                 </span>
               </div>
               <div className="w-full h-2 bg-[#1A1A1A] rounded-full overflow-hidden">
                 <div
-                  className={`h-full transition-all duration-500 rounded-full ${
-                    metrics.seatsPercent > 90 ? "bg-red-500" : "bg-gradient-to-r from-[#D4AF37] to-[#F4D03F]"
-                  }`}
+                  className="h-full bg-gradient-to-r from-[#D4AF37] to-[#F4D03F] rounded-full transition-all duration-500"
                   style={{ width: metrics.seatsLimit === -1 ? "100%" : `${metrics.seatsPercent}%` }}
                 />
               </div>
-              {metrics.seatsLimit !== -1 && (
-                <p className="text-[10px] text-neutral-500 text-right font-bold">
-                  {metrics.seatsPercent}% seat quota used
-                </p>
-              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Plan Selection Section */}
+      {/* Plan Selector & Billing Toggle */}
       <div className="space-y-6 pt-4">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
           <div>
-            <h2 className="text-xl font-extrabold text-white tracking-tight">Available Subscription Plans</h2>
-            <p className="text-xs text-neutral-400 mt-0.5">
-              Upgrade or switch your workspace tier to expand message capacity and operator seats.
-            </p>
+            <h3 className="text-xl font-extrabold text-white">Upgrade or Change Plan</h3>
+            <p className="text-xs text-neutral-400 mt-1">Scale your AI support engine with higher message limits and seats.</p>
           </div>
 
-          {/* Billing Cycle Toggle */}
-          <div className="flex items-center space-x-3 bg-[#111] p-1.5 border border-[#222] rounded-xl">
+          <div className="bg-[#111111] p-1 rounded-xl border border-[#222] flex items-center space-x-1">
             <button
               type="button"
               onClick={() => setBillingCycle("monthly")}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all ${
-                billingCycle === "monthly" ? "bg-[#222] text-white" : "text-neutral-400 hover:text-neutral-200"
+              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                billingCycle === "monthly" ? "bg-[#D4AF37] text-black shadow-md" : "text-neutral-400 hover:text-white"
               }`}
             >
-              Monthly
+              Monthly Billing
             </button>
             <button
               type="button"
               onClick={() => setBillingCycle("annual")}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
-                billingCycle === "annual" ? "bg-[#222] text-white" : "text-neutral-400 hover:text-neutral-200"
+              className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center space-x-1.5 ${
+                billingCycle === "annual" ? "bg-[#D4AF37] text-black shadow-md" : "text-neutral-400 hover:text-white"
               }`}
             >
-              <span>Annual</span>
-              <span className="px-1.5 py-0.5 rounded-full bg-[#D4AF37]/10 text-[#D4AF37] border border-[#D4AF37]/30 text-[9px] font-extrabold uppercase">
-                Save ~17%
+              <span>Annual Billing</span>
+              <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-extrabold">
+                Save 20%
               </span>
             </button>
           </div>
@@ -312,119 +252,108 @@ export default function BillingPage() {
 
         {/* Plans Grid */}
         {isPlansLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-80 bg-[#111] border border-[#222] rounded-2xl p-6 animate-pulse" />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {Array.from({ length: 3 }).map((_, idx) => (
+              <div key={idx} className="bg-[#111111] border border-[#222] rounded-2xl p-6 h-96 animate-pulse" />
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {plans?.map((plan) => {
               const isCurrent = sub?.plan_id === plan.id || sub?.plan_name === plan.name;
-              const isPro = plan.name === "Pro";
-              const isFree = plan.name === "Free Trial" || plan.price_monthly_cents === 0;
-              const priceDisplay = billingCycle === "annual" ? plan.price_annual_display : plan.price_monthly_display;
+              const priceCents = billingCycle === "annual" ? plan.price_annual_cents / 12 : plan.price_monthly_cents;
+              const formattedPrice = formatCurrency(priceCents, true);
 
               return (
                 <div
                   key={plan.id}
-                  className={`relative bg-[#111111] rounded-2xl p-6 flex flex-col justify-between space-y-6 border transition-all duration-300 ${
+                  className={`bg-[#111111] border rounded-2xl p-6 flex flex-col justify-between space-y-6 transition-all relative ${
                     isCurrent
-                      ? "border-emerald-500/50 bg-emerald-500/5"
-                      : isPro
-                      ? "border-[#D4AF37] shadow-lg shadow-[#D4AF37]/10"
-                      : "border-[#222222] hover:border-[#333333]"
+                      ? "border-[#D4AF37] shadow-2xl shadow-[#D4AF37]/10"
+                      : "border-[#222222] hover:border-[#D4AF37]/40"
                   }`}
                 >
-                  {isPro && !isCurrent && (
-                    <div className="absolute -top-3 left-0 right-0 mx-auto w-fit px-3 py-0.5 rounded-full bg-[#D4AF37] text-black text-[10px] font-extrabold uppercase tracking-wider shadow-md">
+                  {plan.name === "Pro" && (
+                    <div className="absolute -top-3 right-6 px-3 py-1 rounded-full bg-gradient-to-r from-[#D4AF37] to-[#F4D03F] text-black font-extrabold text-[10px] uppercase tracking-wider shadow-lg">
                       Most Popular
                     </div>
                   )}
 
-                  {isCurrent && (
-                    <div className="absolute -top-3 left-0 right-0 mx-auto w-fit px-3 py-0.5 rounded-full bg-emerald-500 text-black text-[10px] font-extrabold uppercase tracking-wider shadow-md">
-                      Active Workspace Plan
+                  <div className="space-y-4">
+                    <div className="space-y-1">
+                      <h4 className="text-lg font-extrabold text-white">{plan.name}</h4>
+                      <p className="text-xs text-neutral-400">
+                        {plan.name === "Free Trial"
+                          ? "Test core AI capabilities for 14 days"
+                          : plan.name === "Starter"
+                          ? "Ideal for small support teams & startups"
+                          : plan.name === "Pro"
+                          ? "For growing brands with active customer traffic"
+                          : "Enterprise-grade limits and dedicated support"}
+                      </p>
                     </div>
-                  )}
 
-                  <div className="space-y-4 text-left">
-                    <div>
-                      <h3 className="text-lg font-extrabold text-white">{plan.name}</h3>
-                      <div className="flex items-baseline space-x-1 mt-1">
-                        <span className="text-3xl font-extrabold text-white">{priceDisplay}</span>
-                        <span className="text-xs text-neutral-400">
-                          {isFree ? "" : `/${billingCycle === "annual" ? "yr" : "mo"}`}
+                    <div className="flex items-baseline space-x-1">
+                      <span className="text-3xl font-black text-white">{formattedPrice}</span>
+                      <span className="text-xs text-neutral-400">/ month</span>
+                    </div>
+
+                    <div className="space-y-2.5 pt-4 border-t border-[#1C1C1C] text-xs">
+                      <div className="flex items-center space-x-2 text-neutral-300">
+                        <Check className="h-4 w-4 text-[#D4AF37] shrink-0" />
+                        <span>
+                          {plan.message_limit === -1 ? "Unlimited" : formatNumber(plan.message_limit)} Monthly Messages
                         </span>
                       </div>
-                    </div>
 
-                    {/* Limits summary */}
-                    <div className="space-y-1.5 pt-3 border-t border-[#222222] text-xs text-neutral-300">
-                      <p className="font-semibold">
-                        {plan.message_limit === -1 ? "Unlimited" : plan.message_limit.toLocaleString()} AI Messages / mo
-                      </p>
-                      <p className="text-neutral-400">
-                        {plan.seat_limit === -1 ? "Unlimited" : plan.seat_limit} Operator Seat{plan.seat_limit === 1 ? "" : "s"}
-                      </p>
-                    </div>
+                      <div className="flex items-center space-x-2 text-neutral-300">
+                        <Check className="h-4 w-4 text-[#D4AF37] shrink-0" />
+                        <span>
+                          {plan.seat_limit === -1 ? "Unlimited" : plan.seat_limit} Operator Seats
+                        </span>
+                      </div>
 
-                    {/* Feature Bullets */}
-                    <div className="space-y-2 pt-3 border-t border-[#222222] text-xs text-neutral-400">
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-2 text-neutral-300">
                         <Check className="h-4 w-4 text-[#D4AF37] shrink-0" />
                         <span>
                           {plan.features_json?.sources_limit === -1
-                            ? "Unlimited"
-                            : plan.features_json?.sources_limit || 2}{" "}
-                          Knowledge Sources
+                            ? "Unlimited Knowledge Sources"
+                            : `${plan.features_json?.sources_limit || 2} Knowledge Base Sources`}
                         </span>
                       </div>
+
                       {plan.features_json?.analytics && (
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center space-x-2 text-neutral-300">
                           <Check className="h-4 w-4 text-[#D4AF37] shrink-0" />
-                          <span>CSAT & Resolution Analytics</span>
+                          <span>Advanced Resolution Analytics</span>
                         </div>
                       )}
+
                       {plan.features_json?.api_access && (
-                        <div className="flex items-center space-x-2">
+                        <div className="flex items-center space-x-2 text-neutral-300">
                           <Check className="h-4 w-4 text-[#D4AF37] shrink-0" />
-                          <span>Developer API Access</span>
-                        </div>
-                      )}
-                      {plan.features_json?.webhooks && (
-                        <div className="flex items-center space-x-2">
-                          <Check className="h-4 w-4 text-[#D4AF37] shrink-0" />
-                          <span>Outbound Webhooks</span>
+                          <span>REST API & Webhook Dispatch</span>
                         </div>
                       )}
                     </div>
                   </div>
 
-                  {/* CTA Button */}
                   <button
                     type="button"
-                    onClick={() => handleCheckout(plan.id)}
                     disabled={isCurrent || checkoutMutation.isPending}
+                    onClick={() => handleCheckout(plan.id)}
                     className={`w-full py-3 rounded-xl font-extrabold text-xs transition-all flex items-center justify-center space-x-2 ${
                       isCurrent
-                        ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 cursor-default"
-                        : isPro
-                        ? "bg-[#D4AF37] text-black hover:brightness-110 shadow-lg shadow-[#D4AF37]/20"
-                        : "bg-[#1C1C1C] text-white hover:bg-[#262626] border border-[#333333]"
+                        ? "bg-[#1C1C1C] text-neutral-500 cursor-default"
+                        : "bg-gradient-to-r from-[#D4AF37] via-[#F4D03F] to-[#FFEAA7] text-black hover:brightness-110 shadow-lg shadow-[#D4AF37]/10 active:scale-95"
                     }`}
                   >
-                    {checkoutMutation.isPending && checkoutMutation.variables?.plan_id === plan.id ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Processing...</span>
-                      </>
+                    {checkoutMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-black" />
                     ) : isCurrent ? (
                       <span>Current Active Plan</span>
-                    ) : isFree ? (
-                      <span>Switch to Free Trial</span>
                     ) : (
-                      <span>Upgrade to {plan.name}</span>
+                      <span>Select {plan.name}</span>
                     )}
                   </button>
                 </div>
