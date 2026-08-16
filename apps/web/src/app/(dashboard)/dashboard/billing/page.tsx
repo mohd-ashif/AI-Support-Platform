@@ -23,6 +23,8 @@ import {
   RefreshCw,
 } from "lucide-react";
 
+import { PricingCarousel } from "./components/PricingCarousel";
+
 export default function BillingPage() {
   const toast = useToast();
   const selectedWorkspace = useSelector((state: RootState) => state.auth.selectedWorkspace);
@@ -38,7 +40,7 @@ export default function BillingPage() {
     refetch: refetchSub,
   } = useSubscription(workspaceId);
 
-  const { data: plans, isLoading: isPlansLoading } = usePlans();
+  const { data: plans = [], isLoading: isPlansLoading } = usePlans();
   const checkoutMutation = useCheckoutMutation(workspaceId);
 
   const handleCheckout = useCallback(
@@ -250,7 +252,7 @@ export default function BillingPage() {
           </div>
         </div>
 
-        {/* Plans Grid */}
+        {/* Plans Carousel Component */}
         {isPlansLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {Array.from({ length: 3 }).map((_, idx) => (
@@ -258,108 +260,14 @@ export default function BillingPage() {
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {plans?.map((plan) => {
-              const isCurrent = sub?.plan_id === plan.id || sub?.plan_name === plan.name;
-              const priceCents = billingCycle === "annual" ? plan.price_annual_cents / 12 : plan.price_monthly_cents;
-              const formattedPrice = formatCurrency(priceCents, true);
-
-              return (
-                <div
-                  key={plan.id}
-                  className={`bg-[#111111] border rounded-2xl p-6 flex flex-col justify-between space-y-6 transition-all relative ${
-                    isCurrent
-                      ? "border-[#D4AF37] shadow-2xl shadow-[#D4AF37]/10"
-                      : "border-[#222222] hover:border-[#D4AF37]/40"
-                  }`}
-                >
-                  {plan.name === "Pro" && (
-                    <div className="absolute -top-3 right-6 px-3 py-1 rounded-full bg-gradient-to-r from-[#D4AF37] to-[#F4D03F] text-black font-extrabold text-[10px] uppercase tracking-wider shadow-lg">
-                      Most Popular
-                    </div>
-                  )}
-
-                  <div className="space-y-4">
-                    <div className="space-y-1">
-                      <h4 className="text-lg font-extrabold text-white">{plan.name}</h4>
-                      <p className="text-xs text-neutral-400">
-                        {plan.name === "Free Trial"
-                          ? "Test core AI capabilities for 14 days"
-                          : plan.name === "Starter"
-                          ? "Ideal for small support teams & startups"
-                          : plan.name === "Pro"
-                          ? "For growing brands with active customer traffic"
-                          : "Enterprise-grade limits and dedicated support"}
-                      </p>
-                    </div>
-
-                    <div className="flex items-baseline space-x-1">
-                      <span className="text-3xl font-black text-white">{formattedPrice}</span>
-                      <span className="text-xs text-neutral-400">/ month</span>
-                    </div>
-
-                    <div className="space-y-2.5 pt-4 border-t border-[#1C1C1C] text-xs">
-                      <div className="flex items-center space-x-2 text-neutral-300">
-                        <Check className="h-4 w-4 text-[#D4AF37] shrink-0" />
-                        <span>
-                          {plan.message_limit === -1 ? "Unlimited" : formatNumber(plan.message_limit)} Monthly Messages
-                        </span>
-                      </div>
-
-                      <div className="flex items-center space-x-2 text-neutral-300">
-                        <Check className="h-4 w-4 text-[#D4AF37] shrink-0" />
-                        <span>
-                          {plan.seat_limit === -1 ? "Unlimited" : plan.seat_limit} Operator Seats
-                        </span>
-                      </div>
-
-                      <div className="flex items-center space-x-2 text-neutral-300">
-                        <Check className="h-4 w-4 text-[#D4AF37] shrink-0" />
-                        <span>
-                          {plan.features_json?.sources_limit === -1
-                            ? "Unlimited Knowledge Sources"
-                            : `${plan.features_json?.sources_limit || 2} Knowledge Base Sources`}
-                        </span>
-                      </div>
-
-                      {plan.features_json?.analytics && (
-                        <div className="flex items-center space-x-2 text-neutral-300">
-                          <Check className="h-4 w-4 text-[#D4AF37] shrink-0" />
-                          <span>Advanced Resolution Analytics</span>
-                        </div>
-                      )}
-
-                      {plan.features_json?.api_access && (
-                        <div className="flex items-center space-x-2 text-neutral-300">
-                          <Check className="h-4 w-4 text-[#D4AF37] shrink-0" />
-                          <span>REST API & Webhook Dispatch</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    disabled={isCurrent || checkoutMutation.isPending}
-                    onClick={() => handleCheckout(plan.id)}
-                    className={`w-full py-3 rounded-xl font-extrabold text-xs transition-all flex items-center justify-center space-x-2 ${
-                      isCurrent
-                        ? "bg-[#1C1C1C] text-neutral-500 cursor-default"
-                        : "bg-gradient-to-r from-[#D4AF37] via-[#F4D03F] to-[#FFEAA7] text-black hover:brightness-110 shadow-lg shadow-[#D4AF37]/10 active:scale-95"
-                    }`}
-                  >
-                    {checkoutMutation.isPending ? (
-                      <Loader2 className="h-4 w-4 animate-spin text-black" />
-                    ) : isCurrent ? (
-                      <span>Current Active Plan</span>
-                    ) : (
-                      <span>Select {plan.name}</span>
-                    )}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
+          <PricingCarousel
+            plans={plans}
+            currentPlanId={sub?.plan_id}
+            currentPlanName={sub?.plan_name}
+            billingCycle={billingCycle}
+            isPending={checkoutMutation.isPending}
+            onSelectPlan={handleCheckout}
+          />
         )}
       </div>
     </div>

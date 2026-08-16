@@ -27,27 +27,27 @@ export function useDashboardSocket() {
 
     socket.on("conversation_created", () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.inbox.conversations(activeWsId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.summary(activeWsId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all });
     });
 
     socket.on("conversation_updated", () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.inbox.conversations(activeWsId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.summary(activeWsId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all });
     });
 
     socket.on("new_message", () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.inbox.conversations(activeWsId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.summary(activeWsId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all });
     });
 
     socket.on("analytics_updated", () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.summary(activeWsId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all });
     });
 
     socket.on("source_indexed", () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.sources.web(activeWsId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.sources.files(activeWsId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.summary(activeWsId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.analytics.all });
     });
 
     return () => {
