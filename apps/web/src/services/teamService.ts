@@ -53,10 +53,20 @@ export const teamService = {
     return apiFetch(`/settings/invites/${token}`);
   },
 
-  async acceptInvite(token: string, payload: { name?: string; password?: string }): Promise<{ access_token: string }> {
+  async acceptInvite(token: string, payload?: { name?: string; password?: string }): Promise<{ status: string }> {
     return apiFetch(`/settings/invites/${token}/accept`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload || {}),
+    });
+  },
+
+  async updateStatus(memberId: string, status: string, workspaceId?: string): Promise<{ status: string }> {
+    const headers: Record<string, string> = {};
+    if (workspaceId) headers["X-Workspace-Id"] = workspaceId;
+    return apiFetch<{ status: string }>(`/settings/team/${memberId}/status`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ status }),
     });
   },
 };

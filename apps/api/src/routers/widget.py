@@ -126,6 +126,13 @@ async def update_widget_config(
     member: TeamMember = Depends(require_role(["owner", "admin"])),
     db: AsyncSession = Depends(get_db),
 ):
+    from apps.api.src.dependencies.rbac import has_role_permission, Permissions
+    if not has_role_permission(member.role, Permissions.WIDGET_MANAGE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied. Required permission '{Permissions.WIDGET_MANAGE}' is missing for role '{member.role}'.",
+        )
+
     res = await db.execute(select(WidgetConfig).where(WidgetConfig.workspace_id == member.workspace_id))
     config = res.scalars().first()
     if not config:

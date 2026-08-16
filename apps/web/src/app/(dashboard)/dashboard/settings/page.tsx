@@ -11,7 +11,7 @@ import {
 import { useToast } from "@/components/ui/ToastProvider";
 import { formatDate } from "@/lib/utils/format";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
-import { Settings, Key, Plus, Trash2, Copy, Check, ShieldCheck, Loader2 } from "lucide-react";
+import { Settings, Key, Plus, Trash2, Copy, Check, ShieldCheck, Loader2, Building2 } from "lucide-react";
 
 export default function SettingsPage() {
   const toast = useToast();
@@ -105,6 +105,42 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      {/* Organization & Workspace Details Profile */}
+      <div className="bg-[#111111] border border-[#222222] rounded-2xl p-6 space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-[#222222]">
+          <div className="flex items-center space-x-2">
+            <Building2 className="h-5 w-5 text-[#D4AF37]" />
+            <h3 className="text-sm font-bold text-white">Organization & Workspace Identity</h3>
+          </div>
+          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-[#D4AF37]/10 text-[#D4AF37] border border-[#D4AF37]/20 uppercase tracking-wider">
+            {selectedWorkspace?.business?.status || "Active Organization"}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-1">
+          <div className="bg-[#050505] border border-[#1F1F1F] p-4 rounded-xl space-y-1">
+            <span className="text-[10px] text-neutral-500 uppercase font-bold tracking-wider">Company / Organization</span>
+            <p className="text-sm font-extrabold text-white truncate">
+              {selectedWorkspace?.business?.name || "My Organization"}
+            </p>
+          </div>
+
+          <div className="bg-[#050505] border border-[#1F1F1F] p-4 rounded-xl space-y-1">
+            <span className="text-[10px] text-neutral-500 uppercase font-bold tracking-wider">Organization Slug</span>
+            <p className="text-xs font-mono font-bold text-[#D4AF37] truncate">
+              {selectedWorkspace?.business?.slug || selectedWorkspace?.business?.id?.slice(0, 12) || "default-org"}
+            </p>
+          </div>
+
+          <div className="bg-[#050505] border border-[#1F1F1F] p-4 rounded-xl space-y-1">
+            <span className="text-[10px] text-neutral-500 uppercase font-bold tracking-wider">Workspace UUID</span>
+            <p className="text-xs font-mono font-bold text-neutral-300 truncate">
+              {selectedWorkspace?.workspace_uuid || selectedWorkspace?.id || "N/A"}
+            </p>
+          </div>
+        </div>
+      </div>
 
       {/* Create New API Key */}
       <div className="bg-[#111111] border border-[#222222] rounded-2xl p-6 space-y-4">

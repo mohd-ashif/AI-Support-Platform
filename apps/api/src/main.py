@@ -36,6 +36,7 @@ try:
         onboarding,
         integrations,
         settings as settings_router,
+        notifications,
     )
 except ModuleNotFoundError:
     from src.config.settings import settings
@@ -116,6 +117,19 @@ app.include_router(onboarding.router)
 app.include_router(integrations.router)
 app.include_router(public_chat.router)
 app.include_router(settings_router.router)
+app.include_router(notifications.router)
+
+@app.on_event("startup")
+async def on_startup():
+    try:
+        from apps.api.src.database.session import engine, Base
+        from apps.api.src.scripts.migrate_phase1_tenant_data import run_data_migration
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await run_data_migration()
+        logger.info("[STARTUP] Phase 1 database schema & tenant data migration completed successfully.")
+    except Exception as e:
+        logger.warning(f"[STARTUP] Phase 1 startup database init note: {e}")
 
 @app.get("/health")
 async def health_check():

@@ -34,12 +34,18 @@ import {
   ExternalLink,
 } from "lucide-react";
 
+import { NotificationPopover } from "@/components/ui/NotificationPopover";
+
+import { usePermissions } from "@/hooks/usePermissions";
+import { Permissions } from "@/lib/permissions";
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const dispatch = useDispatch();
   const toast = useToast();
   const queryClient = useQueryClient();
+  const { can } = usePermissions();
 
   // Connect real-time WebSocket listener for live dashboard metrics
   useDashboardSocket();
@@ -80,15 +86,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   };
 
   const navItems = [
-    { name: "Overview", href: "/dashboard", icon: LayoutDashboard },
-    { name: "Live Inbox", href: "/dashboard/inbox", icon: MessageSquare },
-    { name: "Knowledge Base", href: "/dashboard/knowledge", icon: BookOpen },
-    { name: "Widget Setup", href: "/dashboard/widget", icon: Sliders },
-    { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3 },
-    { name: "Team Members", href: "/dashboard/team", icon: Users },
-    { name: "Billing & Plans", href: "/dashboard/billing", icon: CreditCard },
-    { name: "Settings", href: "/dashboard/settings", icon: Settings },
+    { name: "Overview", href: "/dashboard", icon: LayoutDashboard, permission: Permissions.ANALYTICS_READ },
+    { name: "Live Inbox", href: "/dashboard/inbox", icon: MessageSquare, permission: Permissions.CONVERSATIONS_READ },
+    { name: "Knowledge Base", href: "/dashboard/knowledge", icon: BookOpen, permission: Permissions.KNOWLEDGE_READ },
+    { name: "Widget Setup", href: "/dashboard/widget", icon: Sliders, permission: Permissions.WIDGET_READ },
+    { name: "Analytics", href: "/dashboard/analytics", icon: BarChart3, permission: Permissions.ANALYTICS_READ },
+    { name: "Team Members", href: "/dashboard/team", icon: Users, permission: Permissions.TEAM_READ },
+    { name: "Billing & Plans", href: "/dashboard/billing", icon: CreditCard, permission: Permissions.BILLING_READ },
+    { name: "Settings", href: "/dashboard/settings", icon: Settings, permission: Permissions.SETTINGS_READ },
   ];
+
+  const visibleNavItems = navItems.filter((item) => can(item.permission));
 
   return (
     <div className="min-h-screen bg-[#050505] text-white flex">
@@ -175,7 +183,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           {/* Navigation Links */}
           <nav className="space-y-1.5">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = pathname === item.href;
 
@@ -258,13 +266,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
 
           <div className="flex items-center space-x-4">
-            <button
-              type="button"
-              className="p-2 rounded-xl bg-[#141414] border border-[#222222] text-neutral-400 hover:text-white transition-colors relative"
-            >
-              <Bell className="h-4 w-4" />
-              <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-[#D4AF37]" />
-            </button>
+            <NotificationPopover />
             <Link
               href="/onboarding"
               className="hidden sm:flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-[#141414] border border-[#222222] hover:border-[#D4AF37]/40 text-xs font-semibold text-neutral-300 hover:text-white transition-all"

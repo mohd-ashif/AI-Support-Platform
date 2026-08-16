@@ -45,11 +45,14 @@ class Business(Base):
     __tablename__ = "businesses"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
     name: Mapped[str] = mapped_column(String, nullable=False)
+    slug: Mapped[Optional[str]] = mapped_column(String, unique=True, index=True, nullable=True)
     website_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     industry: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     logo_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="active")
     owner_user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 class Workspace(Base):
     __tablename__ = "workspaces"
@@ -159,6 +162,7 @@ class Message(Base):
     __tablename__ = "messages"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
     conversation_id: Mapped[str] = mapped_column(String, ForeignKey("conversations.id"), nullable=False, index=True)
+    workspace_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("workspaces.id"), nullable=True, index=True)
     sender_type: Mapped[str] = mapped_column(String, nullable=False) # visitor, ai, agent
     content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -211,4 +215,25 @@ class Webhook(Base):
     events_json: Mapped[dict] = mapped_column(JSON, default=dict)
     secret: Mapped[str] = mapped_column(String, nullable=False)
 
+class Notification(Base):
+    __tablename__ = "notifications"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    message: Mapped[str] = mapped_column(String, nullable=False)
+    type: Mapped[str] = mapped_column(String, default="info")  # info, warning, success, alert
+    read: Mapped[bool] = mapped_column(Boolean, default=False)
+    action_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
+    actor_user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"), nullable=False, index=True)
+    action: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    resource: Mapped[str] = mapped_column(String, nullable=False)
+    resource_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)

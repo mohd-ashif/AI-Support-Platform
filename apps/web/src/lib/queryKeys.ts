@@ -50,4 +50,8 @@ export const queryKeys = {
     all: ["integrations"] as const,
     snippet: (platform: string, workspaceId?: string) => [...queryKeys.integrations.all, "snippet", platform, workspaceId || "default"] as const,
   },
+  notifications: {
+    all: ["notifications"] as const,
+    list: (workspaceId?: string) => [...queryKeys.notifications.all, "list", workspaceId || "default"] as const,
+  },
 };

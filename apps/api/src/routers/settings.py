@@ -304,7 +304,34 @@ async def remove_team_member(
 
     await db.delete(target)
     await db.commit()
-    return {"status": "ok"}
+    return {"status": "ok", "message": "Team member removed."}
+
+class MemberStatusUpdateRequest(BaseModel):
+    status: str  # active, deactivated
+
+@router.patch("/team/{member_id}/status")
+async def update_member_status(
+    member_id: str,
+    payload: MemberStatusUpdateRequest,
+    member: TeamMember = Depends(require_role(["owner", "admin"])),
+    db: AsyncSession = Depends(get_db),
+):
+    res_target = await db.execute(
+        select(TeamMember).where(
+            TeamMember.id == member_id,
+            TeamMember.workspace_id == member.workspace_id,
+        )
+    )
+    target = res_target.scalars().first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Team member not found.")
+
+    if target.role == "owner" and payload.status == "deactivated":
+        raise HTTPException(status_code=400, detail="Workspace owner cannot be deactivated.")
+
+    target.status = payload.status
+    await db.commit()
+    return {"status": "ok", "member_id": member_id, "member_status": target.status}
 
 # --- STEP 3: BILLING PORTAL ---
 @router.post("/billing/portal")

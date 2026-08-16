@@ -36,8 +36,13 @@ async def create_workspace_step1(
     industry: str,
     logo_url: Optional[str] = None,
 ) -> dict:
-    # Ensure missing schema columns exist on Neon DB
+    # Ensure missing schema columns exist on Neon DB / PostgreSQL
     try:
+        from sqlalchemy import text
+        await db.execute(text("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS slug VARCHAR;"))
+        await db.execute(text("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'active';"))
+        await db.execute(text("ALTER TABLE businesses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE;"))
+        await db.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS workspace_id VARCHAR;"))
         await db.execute(text("ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS integration_viewed BOOLEAN DEFAULT FALSE;"))
         await db.execute(text("ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS widget_tested BOOLEAN DEFAULT FALSE;"))
         await db.commit()
@@ -74,13 +79,24 @@ async def create_workspace_step1(
             detail="Maximum limit of 3 workspaces reached on Free/Starter path.",
         )
 
+    import re
+    def slugify(text: str) -> str:
+        text = text.lower().strip()
+        text = re.sub(r"[^\w\s-]", "", text)
+        text = re.sub(r"[\s_-]+", "-", text)
+        return text or "organization"
+
     # 3. Single DB transaction insert
+    biz_id = generate_uuid()
     business = Business(
+        id=biz_id,
         name=business_name.strip(),
+        slug=f"{slugify(business_name)}-{biz_id[:6]}",
         website_url=normalized_url,
         industry=industry.strip(),
         logo_url=logo_url,
         owner_user_id=user_id,
+        status="active",
     )
     db.add(business)
     await db.flush()
@@ -124,6 +140,7 @@ async def create_workspace_step1(
     # 6. Automatically populate initial Knowledge Chunk for instant AI RAG answers
     initial_chunk = KnowledgeChunk(
         workspace_id=workspace.id,
+        source_type="web",
         source_id=source_web.id,
         content=f"Company Name: {business_name.strip()}\nWebsite URL: {normalized_url}\nIndustry: {industry.strip()}\n\nAbout {business_name.strip()}: We provide enterprise products and customer support services tailored for {industry.strip()}.",
         token_count=50,

@@ -121,6 +121,13 @@ async def get_analytics_summary(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
+    from apps.api.src.dependencies.rbac import has_role_permission, Permissions
+    if not has_role_permission(member.role, Permissions.ANALYTICS_READ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied. Required permission '{Permissions.ANALYTICS_READ}' is missing for role '{member.role}'.",
+        )
+
     from apps.api.src.services.cache_service import (
         async_get_json,
         async_set_json,

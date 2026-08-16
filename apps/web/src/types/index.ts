@@ -13,10 +13,14 @@ export interface User {
 export interface Business {
   id: string;
   name: string;
+  slug?: string | null;
+  status?: string;
   website_url?: string | null;
   industry?: string | null;
   logo_url?: string | null;
   owner_user_id: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Workspace {

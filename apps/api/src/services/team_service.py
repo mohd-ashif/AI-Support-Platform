@@ -1,11 +1,22 @@
+import secrets
+from datetime import timedelta
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func, delete, update
 from fastapi import HTTPException, status
 
-from apps.api.src.models.core import User, TeamMember, Workspace, Plan, Subscription
+from apps.api.src.models.core import (
+    User,
+    TeamMember,
+    Workspace,
+    Business,
+    Invite,
+    Plan,
+    Subscription,
+    utc_now,
+    generate_uuid,
+)
 from apps.api.src.utils.security import hash_password
-from sqlalchemy import func
 
 async def get_team_members(db: AsyncSession, workspace_id: str) -> List[dict]:
     result = await db.execute(
@@ -23,28 +34,28 @@ async def get_team_members(db: AsyncSession, workspace_id: str) -> List[dict]:
             "name": user.name,
             "email": user.email,
             "role": member.role,
+            "status": getattr(member, "status", "active") or "active",
             "avatar_url": user.avatar_url,
-            "joined_at": member.joined_at.isoformat() if member.joined_at else member.invited_at.isoformat(),
+            "joined_at": member.joined_at.isoformat() if getattr(member, "joined_at", None) else utc_now().isoformat(),
         })
     return members
 
-async def invite_team_member(
+async def create_invitation(
     db: AsyncSession,
     workspace_id: str,
+    invited_by_user_id: str,
     email: str,
-    role: str,
+    role: str = "agent",
 ) -> dict:
     norm_email = email.strip().lower()
 
-    # Enforce Seat Quota Limit
+    # 1. Enforce Seat Quota Limit
     seats_count_res = await db.execute(
         select(func.count(TeamMember.id)).where(TeamMember.workspace_id == workspace_id)
     )
     current_seats = seats_count_res.scalar() or 0
 
-    sub_res = await db.execute(
-        select(Subscription).where(Subscription.workspace_id == workspace_id)
-    )
+    sub_res = await db.execute(select(Subscription).where(Subscription.workspace_id == workspace_id))
     sub = sub_res.scalars().first()
 
     ws_res = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
@@ -63,48 +74,180 @@ async def invite_team_member(
             detail=f"Seat limit reached ({current_seats}/{seat_limit}). Upgrade your subscription to add more team members.",
         )
 
-    result = await db.execute(select(User).where(User.email == norm_email))
-    user = result.scalars().first()
-    if not user:
-        name_part = norm_email.split("@")[0].replace(".", " ").title()
-        user = User(
-            email=norm_email,
-            name=f"{name_part} ({role.title()})",
-            password_hash=hash_password("Password123!"),
-        )
-        db.add(user)
-        await db.flush()
+    # 2. Check if user is already an active member of this workspace
+    res_user = await db.execute(select(User).where(User.email == norm_email))
+    existing_user = res_user.scalars().first()
 
-    existing_mem = await db.execute(
-        select(TeamMember).where(
-            TeamMember.workspace_id == workspace_id,
-            TeamMember.user_id == user.id,
+    if existing_user:
+        res_mem = await db.execute(
+            select(TeamMember).where(
+                TeamMember.workspace_id == workspace_id,
+                TeamMember.user_id == existing_user.id,
+            )
+        )
+        if res_mem.scalars().first():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User is already a member of this workspace",
+            )
+
+    # 3. Create or update pending Invite token
+    token = secrets.token_urlsafe(32)
+    expires_at = utc_now() + timedelta(days=7)
+
+    res_inv = await db.execute(
+        select(Invite).where(
+            Invite.workspace_id == workspace_id,
+            Invite.email == norm_email,
+            Invite.status == "pending",
         )
     )
-    if existing_mem.scalars().first():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User is already a member of this workspace",
-        )
+    existing_invite = res_inv.scalars().first()
 
-    member = TeamMember(
+    if existing_invite:
+        existing_invite.token = token
+        existing_invite.expires_at = expires_at
+        existing_invite.role = role
+        invite = existing_invite
+    else:
+        invite = Invite(
+            workspace_id=workspace_id,
+            email=norm_email,
+            role=role,
+            invited_by_user_id=invited_by_user_id,
+            token=token,
+            status="pending",
+            expires_at=expires_at,
+        )
+        db.add(invite)
+
+    await db.commit()
+    await db.refresh(invite)
+
+    invite_link = f"/accept-invite?token={invite.token}"
+    return {
+        "id": invite.id,
+        "email": invite.email,
+        "role": invite.role,
+        "token": invite.token,
+        "invite_link": invite_link,
+        "expires_at": invite.expires_at.isoformat(),
+    }
+
+async def invite_team_member(
+    db: AsyncSession,
+    workspace_id: str,
+    email: str,
+    role: str,
+) -> dict:
+    inv = await create_invitation(
+        db=db,
         workspace_id=workspace_id,
-        user_id=user.id,
+        invited_by_user_id="system_admin",
+        email=email,
         role=role,
     )
-    db.add(member)
+    return {
+        "id": inv["id"],
+        "workspace_id": workspace_id,
+        "user_id": "",
+        "name": email.split("@")[0].title(),
+        "email": email,
+        "role": role,
+        "avatar_url": None,
+        "joined_at": inv["expires_at"],
+    }
+
+async def get_invite_details(db: AsyncSession, token: str) -> dict:
+    res = await db.execute(select(Invite).where(Invite.token == token))
+    invite = res.scalars().first()
+
+    if not invite:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invalid invitation token",
+        )
+
+    if invite.status == "revoked":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invitation has been revoked",
+        )
+
+    if invite.status == "accepted":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invitation has already been accepted",
+        )
+
+    if invite.expires_at < utc_now():
+        invite.status = "expired"
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invitation has expired",
+        )
+
+    # Fetch workspace & business details
+    res_ws = await db.execute(select(Workspace).where(Workspace.id == invite.workspace_id))
+    ws = res_ws.scalars().first()
+
+    biz_name = "Organization"
+    if ws and ws.business_id:
+        res_biz = await db.execute(select(Business).where(Business.id == ws.business_id))
+        biz = res_biz.scalars().first()
+        if biz:
+            biz_name = biz.name
+
+    return {
+        "email": invite.email,
+        "workspace_id": invite.workspace_id,
+        "workspace_name": biz_name,
+        "role": invite.role,
+        "valid": True,
+    }
+
+async def accept_invitation(db: AsyncSession, token: str, current_user: User) -> dict:
+    inv_details = await get_invite_details(db, token)
+
+    res_inv = await db.execute(select(Invite).where(Invite.token == token))
+    invite = res_inv.scalars().first()
+
+    # Check if existing member in target workspace
+    res_mem = await db.execute(
+        select(TeamMember).where(
+            TeamMember.workspace_id == invite.workspace_id,
+            TeamMember.user_id == current_user.id,
+        )
+    )
+    existing_mem = res_mem.scalars().first()
+
+    if existing_mem:
+        existing_mem.role = invite.role
+        existing_mem.status = "active"
+        member = existing_mem
+    else:
+        member = TeamMember(
+            workspace_id=invite.workspace_id,
+            user_id=current_user.id,
+            role=invite.role,
+            status="active",
+            joined_at=utc_now(),
+        )
+        db.add(member)
+
+    invite.status = "accepted"
     await db.commit()
     await db.refresh(member)
 
     return {
         "id": member.id,
         "workspace_id": member.workspace_id,
-        "user_id": user.id,
-        "name": user.name,
-        "email": user.email,
+        "user_id": current_user.id,
+        "name": current_user.name,
+        "email": current_user.email,
         "role": member.role,
-        "avatar_url": user.avatar_url,
-        "joined_at": member.invited_at.isoformat(),
+        "status": member.status,
     }
 
 async def update_team_member_role(
@@ -135,9 +278,67 @@ async def update_team_member_role(
         "name": user.name,
         "email": user.email,
         "role": member.role,
+        "status": getattr(member, "status", "active") or "active",
         "avatar_url": user.avatar_url,
-        "joined_at": member.joined_at.isoformat() if member.joined_at else member.invited_at.isoformat(),
+        "joined_at": member.joined_at.isoformat() if getattr(member, "joined_at", None) else utc_now().isoformat(),
     }
+
+async def toggle_member_status(
+    db: AsyncSession,
+    workspace_id: str,
+    member_id: str,
+    new_status: str,
+) -> dict:
+    result = await db.execute(
+        select(TeamMember, User)
+        .join(User, TeamMember.user_id == User.id)
+        .where(TeamMember.id == member_id, TeamMember.workspace_id == workspace_id)
+    )
+    row = result.first()
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team member not found in this workspace",
+        )
+    member, user = row
+    member.status = new_status
+    await db.commit()
+
+    return {
+        "id": member.id,
+        "workspace_id": member.workspace_id,
+        "user_id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "role": member.role,
+        "status": member.status,
+    }
+
+async def remove_team_member(
+    db: AsyncSession,
+    workspace_id: str,
+    member_id: str,
+    requester_user_id: str,
+) -> dict:
+    result = await db.execute(
+        select(TeamMember).where(TeamMember.id == member_id, TeamMember.workspace_id == workspace_id)
+    )
+    member = result.scalars().first()
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Team member not found in this workspace",
+        )
+
+    if member.user_id == requester_user_id and member.role == "owner":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Workspace owner cannot remove themselves from the organization.",
+        )
+
+    await db.delete(member)
+    await db.commit()
+    return {"message": "Team member removed successfully", "id": member_id}
 
 async def seed_demo_role_accounts(db: AsyncSession, workspace_id: str) -> List[dict]:
     demo_specs = [
@@ -175,6 +376,7 @@ async def seed_demo_role_accounts(db: AsyncSession, workspace_id: str) -> List[d
                 workspace_id=workspace_id,
                 user_id=user.id,
                 role=spec["role"],
+                status="active",
             )
             db.add(mem)
         else:

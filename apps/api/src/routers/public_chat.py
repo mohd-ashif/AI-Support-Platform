@@ -5,7 +5,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, Header, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 
 from apps.api.src.database.session import get_db
 from apps.api.src.models.core import (
@@ -56,9 +56,14 @@ async def create_or_reuse_conversation(
     payload: ConversationCreateRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    # Step 6: Validate workspace_uuid and active status
+    # Step 6: Validate workspace_uuid / workspace_id and active status
     res_ws = await db.execute(
-        select(Workspace).where(Workspace.workspace_uuid == workspace_uuid)
+        select(Workspace).where(
+            or_(
+                Workspace.workspace_uuid == workspace_uuid,
+                Workspace.id == workspace_uuid,
+            )
+        )
     )
     ws = res_ws.scalars().first()
     if not ws:
@@ -124,7 +129,12 @@ async def send_public_message(
     await check_rate_limits(payload.visitor_id, workspace_uuid)
 
     res_ws = await db.execute(
-        select(Workspace).where(Workspace.workspace_uuid == workspace_uuid)
+        select(Workspace).where(
+            or_(
+                Workspace.workspace_uuid == workspace_uuid,
+                Workspace.id == workspace_uuid,
+            )
+        )
     )
     ws = res_ws.scalars().first()
     if not ws:

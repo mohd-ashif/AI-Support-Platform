@@ -14,6 +14,8 @@ import {
 import { useToast } from "@/components/ui/ToastProvider";
 import { formatBytes } from "@/lib/utils/format";
 import { BookOpen, Globe, FileText, Upload, Sparkles, CheckCircle2, Trash2, Loader2, RefreshCw } from "lucide-react";
+import { Can } from "@/components/auth/Can";
+import { Permissions } from "@/lib/permissions";
 
 export default function KnowledgeBasePage() {
   const toast = useToast();

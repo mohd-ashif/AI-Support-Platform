@@ -109,6 +109,13 @@ async def delete_web_source(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
+    from apps.api.src.dependencies.rbac import has_role_permission, Permissions
+    if not has_role_permission(member.role, Permissions.KNOWLEDGE_MANAGE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied. Required permission '{Permissions.KNOWLEDGE_MANAGE}' is missing for role '{member.role}'.",
+        )
+
     res = await db.execute(
         select(SourceWeb).where(SourceWeb.id == source_id, SourceWeb.workspace_id == member.workspace_id)
     )
@@ -233,6 +240,13 @@ async def delete_file_source(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
+    from apps.api.src.dependencies.rbac import has_role_permission, Permissions
+    if not has_role_permission(member.role, Permissions.KNOWLEDGE_MANAGE):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied. Required permission '{Permissions.KNOWLEDGE_MANAGE}' is missing for role '{member.role}'.",
+        )
+
     res = await db.execute(
         select(SourceFile).where(SourceFile.id == source_id, SourceFile.workspace_id == member.workspace_id)
     )

@@ -144,6 +144,15 @@ async def mark_conversation_read(
     member: TeamMember = Depends(get_current_workspace_member),
     db: AsyncSession = Depends(get_db),
 ):
+    res_conv = await db.execute(
+        select(Conversation).where(
+            Conversation.id == conversation_id,
+            Conversation.workspace_id == member.workspace_id,
+        )
+    )
+    if not res_conv.scalars().first():
+        raise HTTPException(status_code=404, detail="Conversation not found or access denied")
+
     res_read = await db.execute(
         select(ConversationRead).where(
             ConversationRead.conversation_id == conversation_id,
@@ -226,6 +235,13 @@ async def send_agent_message(
     conv = res_conv.scalars().first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    from apps.api.src.dependencies.rbac import has_role_permission, Permissions
+    if not has_role_permission(member.role, Permissions.CONVERSATIONS_REPLY):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied. Required permission '{Permissions.CONVERSATIONS_REPLY}' is missing for role '{member.role}'.",
+        )
 
     # Permission check: assigned agent OR owner/admin
     if conv.assigned_agent_id != member.user_id and member.role not in ["owner", "admin"]:

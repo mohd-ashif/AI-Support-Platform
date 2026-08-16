@@ -409,8 +409,14 @@ async def create_checkout_session(
     try:
         await ensure_billing_schema(db)
 
-        # Verify owner/admin role on workspace
-        await get_workspace_membership(payload.workspace_id, current_user, db)
+        # Verify owner/admin role on workspace & BILLING_MANAGE permission
+        mem = await get_workspace_membership(payload.workspace_id, current_user, db)
+        from apps.api.src.dependencies.rbac import has_role_permission, Permissions
+        if not has_role_permission(mem.role, Permissions.BILLING_MANAGE):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied. Required permission '{Permissions.BILLING_MANAGE}' is missing for role '{mem.role}'.",
+            )
         
         res_ws = await db.execute(select(Workspace).where(Workspace.id == payload.workspace_id))
         workspace = res_ws.scalars().first()
