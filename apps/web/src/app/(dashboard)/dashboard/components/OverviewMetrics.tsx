@@ -8,29 +8,40 @@ interface OverviewMetricsProps {
 }
 
 export const OverviewMetrics: React.FC<OverviewMetricsProps> = ({ summary, sourcesCount }) => {
+  const totalConversations = summary?.total_conversations ?? 0;
+  const resolutionRate = summary?.overall_resolution_rate ?? summary?.ai_resolution_rate ?? 0;
+  const responseSpeed = summary?.avg_response_ms ?? summary?.avg_response_speed_ms ?? 0;
+
+  const convChange = summary?.conversations_change;
+  const resChange = summary?.resolution_rate_change;
+  const speedChange = summary?.speed_change_ms;
+
   const metrics = [
     {
       title: "Total AI Conversations",
-      value: summary?.total_conversations !== undefined ? formatNumber(summary.total_conversations) : "—",
+      value: summary ? formatNumber(totalConversations) : "—",
       change:
-        summary?.conversations_change !== undefined
-          ? `${summary.conversations_change >= 0 ? "+" : ""}${summary.conversations_change}%`
-          : "—",
+        convChange !== undefined && convChange !== null
+          ? `${convChange >= 0 ? "+" : ""}${convChange}%`
+          : "+0%",
       icon: MessageSquare,
     },
     {
       title: "AI Resolution Rate",
-      value: summary?.ai_resolution_rate !== undefined ? `${summary.ai_resolution_rate}%` : "—",
+      value: summary ? `${resolutionRate}%` : "—",
       change:
-        summary?.resolution_rate_change !== undefined
-          ? `${summary.resolution_rate_change >= 0 ? "+" : ""}${summary.resolution_rate_change}%`
-          : "—",
+        resChange !== undefined && resChange !== null
+          ? `${resChange >= 0 ? "+" : ""}${resChange}%`
+          : "+0%",
       icon: Sparkles,
     },
     {
       title: "Avg Response Speed",
-      value: summary?.avg_response_speed_ms !== undefined ? `${summary.avg_response_speed_ms} ms` : "—",
-      change: summary?.speed_change_ms !== undefined ? `${summary.speed_change_ms} ms` : "—",
+      value: summary ? `${responseSpeed} ms` : "—",
+      change:
+        speedChange !== undefined && speedChange !== null
+          ? `${speedChange} ms`
+          : "0 ms",
       icon: Clock,
     },
     {

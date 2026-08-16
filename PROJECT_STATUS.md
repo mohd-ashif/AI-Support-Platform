@@ -1,26 +1,102 @@
-# 🚀 SupportAI Platform - Complete Project Status & Architecture Documentation
+# 🚀 SupportAI Platform - A to Z Master System Architecture & Complete Flow Documentation
 
-**Document Version:** 1.0.0  
+**Document Version:** 4.0.0  
 **Last Updated:** August 2026  
-**System Status:** Fully Operational & Validated  
+**Git Commit:** `dd19eb70` (main branch)  
+**System Status:** Fully Operational, Optimized & Production-Ready  
 
 ---
 
-## 📋 Executive Summary
-
-**SupportAI Platform** is an enterprise-grade, multi-tenant AI Customer Support and Knowledge Base platform built using Next.js 14, FastAPI, Neon PostgreSQL (with `pgvector` extension), Upstash Redis, Cloudinary, and OpenAI LLM architectures.
-
-The system allows businesses to ingest company documentation (PDFs, DOCX files, TXT documents) and crawl entire website domains, automatically generating 1536-dimensional vector embeddings stored securely in Neon PostgreSQL. Visitors interacting with the embedded floating chat widget receive real-time, grounded, hallucination-free support answers. If queries require human escalation or reach system volume thresholds, human operators can seamlessly perform **Live Session Takeover** from the Operator Inbox.
+## 📋 Table of Contents
+1. [Executive Summary & System Purpose](#1-executive-summary--system-purpose)
+2. [Comprehensive Feature Catalog & Platform Capabilities](#2-comprehensive-feature-catalog--platform-capabilities)
+3. [End-to-End System Data Flows & Connection Architecture](#3-end-to-end-system-data-flows--connection-architecture)
+   - [Flow 1: User Registration, Authentication & JWT Authorization](#flow-1-user-registration-authentication--jwt-authorization)
+   - [Flow 2: Business Onboarding & Automated Workspace Provisioning](#flow-2-business-onboarding--automated-workspace-provisioning)
+   - [Flow 3: Knowledge Document Ingestion, Web Crawling & Vector Embedding](#flow-3-knowledge-document-ingestion-web-crawling--vector-embedding)
+   - [Flow 4: Third-Party Web Embedding & Public Visitor Chat Session](#flow-4-third-party-web-embedding--public-visitor-chat-session)
+   - [Flow 5: RAG Vector Search & Multi-Model Inference Reasoning Pipeline](#flow-5-rag-vector-search--multi-model-inference-reasoning-pipeline)
+   - [Flow 6: Live Operator Handoff, Socket.io Broadcast & Session Takeover](#flow-6-live-operator-handoff-socketio-broadcast--session-takeover)
+   - [Flow 7: Stripe Billing, Webhook Ingestion & Monthly Quota Enforcement](#flow-7-stripe-billing-webhook-ingestion--monthly-quota-enforcement)
+   - [Flow 8: Developer API Key Authentication & Rate Limiting](#flow-8-developer-api-key-authentication--rate-limiting)
+4. [Complete Technology Stack & Ecosystem](#4-complete-technology-stack--ecosystem)
+5. [Frontend App Router Structure & Pages](#5-frontend-app-router-structure--pages)
+6. [AI Widget Configuration Studio Architecture](#6-ai-widget-configuration-studio-architecture)
+7. [Modular AI Chat Component Suite](#7-modular-ai-chat-component-suite)
+8. [Frontend State & Zero-Flash Hydration Architecture](#8-frontend-state--zero-flash-hydration-architecture)
+9. [Complete Backend REST API Endpoint Map](#9-complete-backend-rest-api-endpoint-map)
+10. [PostgreSQL Schema, Models & Vector Indexes](#10-postgresql-schema-models--vector-indexes)
+11. [Verification Checklist & Git Log](#11-verification-checklist--git-log)
 
 ---
 
-## 🏗️ Technical Architecture & Tech Stack
+## 1. Executive Summary & System Purpose
+
+**SupportAI Platform** is an enterprise-grade, multi-tenant AI Customer Support and Knowledge Base platform built using Next.js 14 (App Router), FastAPI, Neon PostgreSQL (with `pgvector` extension), Upstash Redis, Cloudinary, and OpenAI / Groq LLM architectures.
+
+The platform enables businesses to ingest company documentation (PDFs, DOCX files, TXT documents) and crawl entire website domains, automatically generating 1536-dimensional vector embeddings stored securely in Neon PostgreSQL. Visitors interacting with the embedded floating chat widget receive real-time, grounded, hallucination-free support answers. If queries require human escalation or reach system volume thresholds, human operators can seamlessly perform **Live Session Takeover** from the Operator Inbox.
+
+---
+
+## 2. Comprehensive Feature Catalog & Platform Capabilities
+
+### 🏢 Multi-Tenant Workspace & Organization Management
+- **Multi-Tenant Isolation**: Multi-workspace architecture where data, conversations, team members, and knowledge vectors are isolated per `workspace_id`.
+- **Role-Based Access Control (RBAC)**: Supports `owner`, `admin`, and `agent` member roles.
+- **Team Email Invites**: Generate signed email invitation tokens allowing team members to join existing workspaces (`/invite/[token]`).
+- **Workspace Switcher**: Top header workspace switcher with instant active workspace state management.
+
+### 📚 AI RAG Vector Knowledge Base & Document Training (`/dashboard/knowledge`)
+- **Document Processing**: Upload company PDF, DOCX, and TXT files to Cloudinary with text extraction.
+- **Tiktoken Semantic Chunking**: Auto-splits text into 250-token semantic chunks with a 30-token overlap.
+- **1536-Dim Vector Embeddings**: Generates embeddings via OpenAI `text-embedding-3-small` stored in Neon PostgreSQL `pgvector`.
+- **Async Web Crawler**: Domain crawler (httpx + BeautifulSoup) with SSRF Guard that extracts pages, parses content, and vectorizes content automatically.
+
+### 🎨 AI Widget Configuration Studio (`/dashboard/widget`)
+- **2-Column Responsive Studio**: Scrollable configuration form on left, `sticky top-6` Live Preview Studio on right.
+- **Device Frame Switcher**: Switch between Desktop and Mobile preview containers (`[ Desktop ] [ Mobile ]`).
+- **Section Navigation Bar**: Smooth-scrolling jump bar (`Brand & Theme`, `Greeting`, `Quick Actions`, `Installation`).
+- **Brand Identity & Presets**: Custom Logo Uploader & `AssistantAvatar` fallback, tagline editor, and 1-click curated accent color presets (Gold `#D4AF37`, Royal Blue `#3B82F6`, Emerald `#10B981`, Purple `#8B5CF6`, Rose `#F43F5E`).
+- **Quick Action Card Manager**: Add, Edit, Delete up to 4 prompt suggestion cards with capacity tracking (`2 / 4 actions`).
+- **One-Click Script Generator**: Copy embedding script tag with tabs for HTML, React, and Next.js.
+
+### 💬 Floating Customer Support Chat Widget (`embed.js`)
+- **Single-Line Script Embed**: Lightweight script insertion for third-party websites.
+- **Staggered 3-Dot Typing Indicator**: CSS keyframe pulse animation (`●  ●  ●`) for thinking feedback.
+- **Structured Markdown & Code Blocks**: Markdown rendering for headers, lists, bold text, and dark code blocks with copy buttons and `✓ Copied` feedback.
+- **Compact Assistant Action Bar**: Copy message text, Regenerate response, and Helpful/Unhelpful feedback buttons.
+- **Auto-Resizing Input Composer**: Multi-line textarea (1 to 4 lines) with `Enter`-to-send, `Shift+Enter` newline, and dynamic **Stop / Send** button.
+- **Intelligent Auto-Scroll**: Follows new content when near bottom; displays floating **"↓ New response"** pill if user scrolls up.
+
+### 🎧 Live Operator Inbox & Human Session Takeover (`/dashboard/inbox`)
+- **Real-Time Customer Inbox**: List customer chat sessions with status indicators (`ai`, `human`, `resolved`).
+- **Socket.io Real-Time Broadcasting**: Multi-room WebSocket event dispatch for instant message updates.
+- **Live Session Takeover**: 1-click **Take Over Conversation** button transitions thread from AI bot to human support agent.
+- **Direct Agent Composer**: Enables human operators to reply directly to website visitors.
+
+### 📊 Analytics & Performance Metrics (`/dashboard/analytics`)
+- **KPI Metrics Cards**: Total Conversations, AI Accuracy %, Average Response Time, and Escalation Rate.
+- **Date Range Filters**: Filter metrics by `7d`, `30d`, and `90d`.
+- **Top Questions Analysis**: Automated frequency ranking of top customer inquiries.
+
+### 🔑 Developer API Keys & Settings (`/dashboard/settings`)
+- **API Key Generator**: Create developer API keys (`sk_live_...`) hashed with SHA-256 in PostgreSQL.
+- **Upstash Redis Rate Limiting**: Enforces 100 req/min token bucket rate limits per API key.
+
+### 💳 Stripe Billing & Monthly Quota System (`/dashboard/billing`)
+- **Subscription Tier Plans**: `Free` (1,000 msgs/mo), `Starter` ($49/mo, 10,000 msgs/mo), `Enterprise` ($199/mo, 100,000 msgs/mo).
+- **Stripe Checkout & Webhook**: Automated subscription status updates upon `checkout.session.completed`.
+- **Monthly Limit Enforcement**: Gracefully notifies visitors when monthly quota is reached and escalates to human agents.
+
+---
+
+## 3. End-to-End System Data Flows & Connection Architecture
 
 ```mermaid
 graph TD
     subgraph Client Layer
         W[Third-Party Website / Embedded Script] -->|HTTPS REST / Polling| API
-        FE[Next.js 14 Web Dashboard] -->|Redux Toolkit & REST| API[FastAPI Backend Server]
+        FE[Next.js 14 Web Dashboard] -->|TanStack Query, Zustand, Redux| API[FastAPI Backend Server]
     end
 
     subgraph Service Layer
@@ -35,435 +111,234 @@ graph TD
         RAG -->|1536-Dim Vector Search| NEON[(Neon PostgreSQL + pgvector)]
         DOC -->|File Storage| CLOUD[Cloudinary Storage]
         API -->|Session Caching & Rate Limiting| UPSTASH[(Upstash Redis)]
-        API -->|OpenAI Completions & Embeddings| OA[OpenAI gpt-4o-mini]
+        API -->|OpenAI & Groq Completions| OA[OpenAI gpt-4o-mini & Groq Llama-3.3]
     end
 ```
 
-### Stack Breakdown
+---
 
-| Layer | Technology | Key Usage |
-| :--- | :--- | :--- |
-| **Frontend UI** | Next.js 14 (App Router), React 18, TypeScript | Dashboard UI, Real-time Customization, Inbox |
-| **State & Styling** | Redux Toolkit, Lucide React, Vanilla CSS Tokens | Global auth & workspace state, Glassmorphism UI |
-| **Backend API** | Python 3.11, FastAPI, Pydantic v2 | High-performance async REST API endpoints |
-| **Database** | Neon PostgreSQL + `pgvector` extension | Relational schema + 1536-dim vector embeddings |
-| **ORM & Async** | SQLAlchemy 2.0 (AsyncIO), Asyncpg | Non-blocking database session management |
-| **Caching & Rate Limit** | Upstash Redis | Sliding-window abuse prevention & session storage |
-| **Media Storage** | Cloudinary API | Secure document & asset storage |
-| **LLM & Embeddings** | OpenAI API (`gpt-4o-mini`, `text-embedding-3-small`) | Grounded RAG reasoning and vector embeddings |
+### Flow 1: User Registration, Authentication & JWT Authorization
 
+1. **User Credentials Verification**: The user enters their email/password on `/login` or clicks "Sign in with Google" (`/auth/google/callback`).
+2. **Token Generation**: FastAPI verifies credentials against PostgreSQL `users` table and issues a cryptographically signed JWT access token.
+3. **Redux & Persistent State**: The token and user profile are dispatched to Redux `authSlice` and synchronized with `localStorage`.
+4. **Authenticated Requests**: Every subsequent HTTP request sent by `apiFetch` includes `Authorization: Bearer <token>` and `X-Workspace-Id: <active_workspace_id>`.
 
 ---
 
-## 🤖 How the AI Support Bot Works (RAG & Reasoning Pipeline)
+### Flow 2: Business Onboarding & Automated Workspace Provisioning
 
-The **SupportAI Chatbot Engine** operates on a **Retrieval-Augmented Generation (RAG)** architecture with multi-model fallback, strict grounding guardrails, and real-time operator handoff.
+1. **Onboarding Submission**: User specifies their company name, website link, and industry during onboarding (`/onboarding/business`).
+2. **Database Provisioning**: Backend creates relational `Business`, `Workspace`, `TeamMember` (`owner`), and `WidgetConfig` entities in a single atomic transaction.
+3. **Automated Branding**: `WidgetConfig` is pre-configured with the business name as brand name, Gold `#D4AF37` as accent color, and an on-brand welcome greeting.
+4. **Knowledge Seed**: The business website URL is automatically registered in `source_web` under **Knowledge Base** (`/dashboard/knowledge`), and an initial `KnowledgeChunk` vector is generated into Neon PostgreSQL so the AI assistant can answer company questions out of the box.
+
+---
+
+### Flow 3: Knowledge Document Ingestion, Web Crawling & Vector Embedding
 
 ```mermaid
 flowchart TD
-    A[Visitor Message / Question] --> B{Natural Greeting?}
-    B -- Yes --> C[Return On-Brand Welcome Greeting]
-    B -- No --> D[Generate 1536-Dim Embedding Vector]
-    D --> E[Query Neon PostgreSQL via pgvector Cosine Search]
-    E --> F{Chunks Found above Threshold?}
-    F -- Yes --> G[Inject Retrieved Knowledge Chunks into System Prompt]
-    F -- No --> H[Fallback: Fetch Top Workspace Knowledge Chunks]
-    H --> G
-    G --> I[Send System Prompt to LLM Pipeline]
-    I --> J{Model Candidate Attempt}
-    J -- Groq Llama-3.3-70b --> K[Generate Grounded Answer]
-    J -- Groq Llama-3.1-8b --> K
-    J -- OpenAI gpt-4o-mini --> K
-    J -- LLM API Offline --> L[Direct Document Chunk Extraction Fallback]
-    K --> M[Deliver Answer via Socket.io / Polling]
-    L --> M
-```
-
-### Detailed Pipeline Breakdown:
-
-1. **Document Ingestion & Semantic Chunking** ([`chunker_service.py`](file:///d:/ashif/Resume%20Projects/AI-Support-Platform/apps/api/src/services/chunker_service.py)):
-   - When a company document (PDF, DOCX, TXT resume/faq) or web page is uploaded, text is extracted and split into **250-token semantic chunks** with a 30-token overlap using `tiktoken`.
-
-2. **Vector Embeddings (1536-Dimensional)** ([`embedding_service.py`](file:///d:/ashif/Resume%20Projects/AI-Support-Platform/apps/api/src/services/embedding_service.py)):
-   - Text chunks are passed through a neural network embedding model (`text-embedding-3-small` or fallback vector generator) to produce **1,536-dimensional floating-point vectors**.
-   - Embeddings are stored in the `knowledge_chunks` table in **Neon PostgreSQL** using the `pgvector` extension.
-
-3. **Multi-Tenant Cosine Vector Search** ([`agent_graph.py`](file:///d:/ashif/Resume%20Projects/AI-Support-Platform/apps/api/src/graph/agent_graph.py)):
-   - When a visitor asks a question (e.g. *"who is Muhammed Ashif?"*), the query is vectorized and compared against chunks stored under that exact `workspace_id`:
-     $$\text{Similarity} = 1 - (\text{embedding} \Leftrightarrow \text{query\_vector})$$
-   - If vector distance is below 0.5 threshold (e.g. mock vectors or specialized phrasing), the system automatically triggers a **workspace knowledge fallback** to ensure uploaded document content is never missed.
-
-4. **Multi-Model LLM Reasoning Engine** ([`agent_graph.py`](file:///d:/ashif/Resume%20Projects/AI-Support-Platform/apps/api/src/graph/agent_graph.py)):
-   - The engine builds a strict grounding system prompt using the retrieved context blocks.
-   - It executes a resilient candidate fallback chain:
-     1. **Groq API**: `llama-3.3-70b-versatile` (Ultra-low latency ~300 tokens/sec)
-     2. **Groq API**: `llama-3.1-8b-instant` (Fast secondary fallback)
-     3. **OpenAI API**: `gpt-4o-mini` (OpenAI model fallback)
-     4. **Direct Chunk Extraction**: If external LLMs are unreachable, extracts text directly from the top matching knowledge chunks so visitors always receive a response.
-
-5. **Human Operator Takeover & Escalation** ([`public_chat.py`](file:///d:/ashif/Resume%20Projects/AI-Support-Platform/apps/api/src/routers/public_chat.py)):
-   - If a visitor requests a human (*"talk to a person"*, *"support agent"*) or reaches unresolved thresholds, the thread transitions to `status="human"`, routing real-time chat messages to human operators in the **Operator Inbox**.
-
----
-
-## 🗄️ Complete Database Schema & Models
-
-The platform enforces strict multi-tenant isolation across all tables using mandatory `workspace_id` scoping.
-
-```mermaid
-erDiagram
-    WORKSPACES ||--o{ TEAM_MEMBERS : contains
-    WORKSPACES ||--o{ SOURCES_WEB : owns
-    WORKSPACES ||--o{ SOURCES_FILES : owns
-    WORKSPACES ||--o{ KNOWLEDGE_CHUNKS : owns
-    WORKSPACES ||--o{ CONVERSATIONS : logs
-    WORKSPACES ||--o| WIDGET_CONFIGS : configures
-    CONVERSATIONS ||--o{ MESSAGES : contains
-    USERS ||--o{ TEAM_MEMBERS : belongs_to
-
-    WORKSPACES {
-        string id PK
-        string name
-        string workspace_uuid
-        string plan_id FK
-        string status
-        boolean integration_viewed
-        boolean widget_tested
-        datetime created_at
-    }
-
-    KNOWLEDGE_CHUNKS {
-        string id PK
-        string workspace_id FK
-        string source_type
-        string source_id
-        text content
-        vector_1536 embedding
-        integer token_count
-        datetime created_at
-    }
-
-    CONVERSATIONS {
-        string id PK
-        string workspace_id FK
-        string visitor_id
-        string channel
-        string status
-        string assigned_agent_id FK
-        datetime created_at
-    }
-
-    MESSAGES {
-        string id PK
-        string conversation_id FK
-        string sender_type
-        text content
-        datetime created_at
-    }
-
-    WIDGET_CONFIGS {
-        string id PK
-        string workspace_id FK
-        string brand_name
-        string tagline
-        string logo_url
-        string primary_color
-        text greeting_message
-        json content_cards_json
-    }
+    A[Upload PDF/DOCX or Enter Website URL] --> B{Source Type?}
+    B -- Document File --> C[Upload to Cloudinary Storage]
+    C --> D[Extract Text via PyPDF / Docx Parser]
+    B -- Website Domain --> E[Async Crawler with SSRF Protection]
+    E --> F[Extract HTML Content & Text]
+    D --> G[Tiktoken Semantic Chunking: 250-token blocks]
+    F --> G
+    G --> H[OpenAI text-embedding-3-small API]
+    H --> I[Generate 1536-Dimensional Floating Point Vectors]
+    I --> J[Save to Neon PostgreSQL knowledge_chunks with pgvector index]
+    J --> K[Invalidate Query Cache & Notify UI via Socket.io]
 ```
 
 ---
 
-## 🔄 Module-by-Module Functionality & Flows
+### Flow 4: Third-Party Web Embedding & Public Visitor Chat Session
 
-### 1. Knowledge Base & RAG Ingestion Pipeline
-
-The RAG ingestion pipeline processes both web domain documentation and uploaded file assets (PDF, DOCX, TXT).
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as Dashboard User
-    participant API as FastAPI Router (/sources)
-    participant Svc as Source Service
-    participant Crawl as Web Crawler / Extractor
-    participant Chunk as Tiktoken Chunker
-    participant DB as Neon PostgreSQL (pgvector)
-
-    User->>API: POST /sources/web or /sources/files
-    API->>Svc: Validate SSRF & Enforce Plan Limits
-    Svc->>DB: Insert Source record (status="pending")
-    API-->>User: HTTP 200 OK (returns pending in < 50ms)
-    
-    par Async Background Processing
-        API->>Svc: Launch asyncio background task
-        Svc->>Crawl: Fetch HTML / Extract document text
-        Crawl-->>Svc: Extracted raw text
-        Svc->>Chunk: chunk_text(target_tokens=250, overlap=30)
-        Chunk-->>Svc: Raw text chunks
-        Svc->>API: Generate 1536-dim OpenAI Embeddings
-        Svc->>DB: Delete old chunks & insert KnowledgeChunk records
-        Svc->>DB: Update Source status = "ready"
-    end
-```
-
-#### Key Capabilities:
-- **SSRF Protection**: All URLs pass through `validate_url_ssrf` to block private IP ranges, loopback addresses (`127.0.0.1`), and AWS metadata endpoints (`169.254.169.254`).
-- **Non-Blocking Ingestion**: Ingestion runs in async background tasks (`AsyncSessionLocal()`), returning pending responses to HTTP clients in **under 50ms**.
-- **Robots.txt Compliance**: `crawl_website` respects `robots.txt` disallow directives via `urllib.robotparser` wrapped in `asyncio.to_thread` to ensure zero event loop blocking.
-- **Idempotent Writes**: Re-crawling or re-uploading a source automatically cleans up prior embeddings to prevent duplicate vector entries.
+1. **Script Tag Insertion**: Third-party websites include a single lightweight `<script>` tag pointing to `embed.js`.
+2. **Widget Hydration**: The script fetches workspace configuration from `/public/{embed_uuid}/config`.
+3. **Session Initialization**: When the visitor opens the widget, a conversation record is instantiated via `POST /public/{embed_uuid}/conversations` with a unique visitor ID.
 
 ---
 
-### 2. Grounded AI Reasoning & Retrieval Engine
+### Flow 5: RAG Vector Search & Multi-Model Inference Reasoning Pipeline
 
-The AI agent processes incoming customer questions using a strict grounding pipeline to ensure zero hallucinations.
-
-```mermaid
-flowchart TD
-    A[Visitor Message Received] --> B{Is Greeting?}
-    B -- Yes --> C[Return Assistant Welcome Message]
-    B -- No --> D[Generate 1536-Dim Vector Embedding]
-    D --> E[Execute pgvector Cosine Distance Query]
-    E --> F{Chunks Retrieved & Score >= 0.2?}
-    F -- Yes --> G[Format Context Blocks in XML Sandbox]
-    F -- No --> H[Return Honest Refusal / Escalation Offer]
-    G --> I{OpenAI API Key Available?}
-    I -- Yes --> J[Execute OpenAI gpt-4o-mini Completion]
-    I -- No --> K[Extract Facts directly from Top Chunks]
-    J --> L[Save AI Message & Return Response]
-    K --> L
-```
-
-#### Grounding & Security Guarantees:
-1. **XML Prompt Sandboxing**: Retrieved chunks are wrapped inside `<retrieved_context>` XML tags. The system prompt instructs `gpt-4o-mini` to treat context strictly as reference data and ignore any instructions inside chunks (prompt injection prevention).
-2. **Confidence Thresholding**: If retrieval confidence falls below `0.2` or no chunks exist for a query, the model refuses to guess and offers human escalation.
-3. **Deterministic Fallback**: If OpenAI API credentials are unavailable or rate-limited, a query term matching algorithm extracts facts directly from top knowledge chunks.
+1. **Message Dispatch**: User sends query $\rightarrow$ UI renders message optimistically (0ms latency), input clears, 3-dot typing indicator appears.
+2. **Vector Search**: FastAPI vectorizes query using OpenAI Embeddings API (1536-dim vector) and executes Cosine Similarity search in Neon PostgreSQL (`1 - (embedding <=> query_vector)`).
+3. **Async Candidate Chain**: Executes non-blocking LLM model candidates (with 4s timeouts):
+   - **Candidate 1**: Groq API `llama-3.3-70b-versatile` (~300 tokens/sec)
+   - **Candidate 2**: Groq API `llama-3.1-8b-instant`
+   - **Candidate 3**: OpenAI API `gpt-4o-mini`
+   - **Candidate 4**: Direct Document Extraction Fallback if LLM APIs are offline
+4. **Socket Broadcast**: Saves message to PostgreSQL and emits `message:new` event via Socket.io.
 
 ---
 
-### 3. Widget Customization & Live Preview System
+### Flow 6: Live Operator Handoff, Socket.io Broadcast & Session Takeover
 
-The **Widget Setup** module (`/dashboard/widget`) gives business owners complete control over the floating chat widget branding.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Admin as Dashboard Admin
-    participant Page as Widget Setup Page
-    participant Preview as Live Preview Panel
-    participant API as FastAPI Backend (/widget/config)
-    participant DB as Database
-
-    Page->>API: GET /widget/config
-    API->>DB: Fetch WidgetConfig
-    DB-->>Page: Return brand_name, tagline, primary_color, cards
-    
-    Admin->>Page: Type changes in form controls
-    Page->>Preview: Update Preview DOM in real-time (0ms)
-    
-    note over Page: User pauses typing for 800ms
-    Page->>API: PATCH /widget/config (Full Form State)
-    API->>DB: Update WidgetConfig & timestamp
-    API-->>Page: Return updated WidgetConfigResponse
-    Page->>Page: Display "All changes saved" badge
-```
-
-#### Key Capabilities:
-- **Real-Time Live Reactivity**: Typing in *Brand Name*, *Tagline*, *Greeting Message*, *Logo URL*, or changing *Primary Color* updates the live preview DOM instantly.
-- **Debounced Autosave (~800ms)**: Automatically persists full form state to prevent race conditions without needing a manual "Save" button.
-- **Interactive Preview Chat**: Admins can type and send test messages directly inside the preview chat box to test AI answers live.
-- **Multi-Platform Integration Tabs**: Provides cached, tab-switchable embed snippets for **HTML**, **React**, **Next.js**, and **Other Stacks** (WordPress, Webflow, Shopify).
+1. **Intent / Confidence Trigger**: RAG Router detects escalation intent phrase or low confidence score.
+2. **Status Update**: Conversation status set to `"human"` and `conversation:status_changed` emitted.
+3. **Inbox Alert**: Live Operator Inbox (`/dashboard/inbox`) displays real-time notification alert and `"HUMAN"` badge.
+4. **Agent Session Takeover**: Operator clicks **Take Over Conversation** (`POST /conversations/{id}/assign`), pausing AI auto-responses and allowing direct human agent replies.
 
 ---
 
-### 4. Live Operator Inbox & Human Takeover Loop
+### Flow 7: Stripe Billing, Webhook Ingestion & Monthly Quota Enforcement
 
-The **Live Inbox** (`/dashboard/inbox`) allows human support agents to monitor customer conversations and perform session takeover when needed.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Visitor as Customer / Widget
-    actor Agent as Human Support Agent
-    participant Inbox as Live Inbox UI (/dashboard/inbox)
-    participant API as FastAPI Inbox Router
-    participant DB as Neon PostgreSQL
-
-    Visitor->>API: POST /public/.../messages (Visitor Query)
-    API->>DB: Insert Message (sender="visitor")
-    API->>DB: AI responds or evaluates escalation
-    
-    loop Realtime REST Stream (Every 3s)
-        Inbox->>API: GET /conversations
-        API->>DB: Query workspace conversations
-        API-->>Inbox: Return active conversation threads
-    end
-
-    Agent->>Inbox: Select conversation & Click "Take Over Session"
-    Inbox->>API: POST /conversations/{id}/assign { force: true }
-    API->>DB: Update conversation.status = "human"
-    API-->>Inbox: Return Assigned Status
-
-    Agent->>Inbox: Type operator reply & click Send
-    Inbox->>API: POST /conversations/{id}/messages { content }
-    API->>DB: Insert Message (sender="agent")
-    
-    loop Widget Polling (Every 2.5s)
-        Visitor->>API: GET /public/.../messages
-        API-->>Visitor: Return Human Agent Reply
-    end
-```
-
-#### Status Lifecycle:
-- `bot`: AI handles customer messages automatically.
-- `human`: Session claimed by human agent. AI response loop pauses completely so agent has exclusive control.
-- `resolved`: Session closed by human operator.
+1. **Checkout Initiation**: User selects Starter ($49/mo) or Enterprise ($199/mo) plan $\rightarrow$ FastAPI creates Stripe Checkout URL.
+2. **Webhook Ingestion**: Stripe processes payment and fires webhook to `/billing/webhook`, updating `Subscription` table status to `"active"`.
+3. **Quota Enforcement**: Before AI generation, backend validates monthly message quota. If quota is exceeded, notifies visitor and escalates to human agents.
 
 ---
 
-## 🌐 Complete API Endpoints Reference
+### Flow 8: Developer API Key Authentication & Rate Limiting
 
-### 1. Authentication & Workspaces (`/auth`, `/workspaces`)
+1. **Key Generation**: Generates raw key `sk_live_...` and stores SHA-256 hash in PostgreSQL `api_keys` table.
+2. **Middleware Validation**: Request with `X-API-Key` header verified against hash in DB.
+3. **Rate Limiter**: Upstash Redis enforces 100 req/min limit per key.
 
-| Method | Endpoint | Access | Description |
+---
+
+## 4. Complete Technology Stack & Ecosystem
+
+| Layer | Technology | Version | Key Purpose |
 | :--- | :--- | :--- | :--- |
-| `POST` | `/auth/register` | Public | Register new user account |
-| `POST` | `/auth/login` | Public | Authenticate user & return JWT tokens |
-| `POST` | `/auth/refresh` | Public | Refresh expired access token using refresh cookie |
-| `GET` | `/auth/me` | Authenticated | Fetch current authenticated user profile |
-| `GET` | `/workspaces` | Authenticated | List all accessible workspaces for user |
-| `POST` | `/workspaces` | Authenticated | Create a new workspace |
-
-### 2. Knowledge Base & Sources (`/sources`)
-
-| Method | Endpoint | Access | Description |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/sources/web` | Member | Ingest & crawl website URL asynchronously |
-| `GET` | `/sources/web` | Member | List all crawled web sources for workspace |
-| `DELETE` | `/sources/web/{id}` | Member | Delete web source and cascade delete vectors |
-| `POST` | `/sources/web/{id}/recrawl` | Member | Re-crawl website and update embeddings |
-| `POST` | `/sources/files` | Member | Upload document file (PDF/DOCX/TXT) to Cloudinary & embed |
-| `GET` | `/sources/files` | Member | List all file sources for workspace |
-| `DELETE` | `/sources/files/{id}` | Member | Delete file source and cascade delete vectors |
-
-### 3. Widget Customization & Public Config (`/widget`, `/public`)
-
-| Method | Endpoint | Access | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/widget/config` | Member | Fetch current workspace widget customization settings |
-| `PATCH` | `/widget/config` | Owner/Admin | Update widget branding, colors, greeting, and cards |
-| `GET` | `/public/widget-config` | Public | Fetch public widget config for embedded script |
-
-### 4. Public Chat Engine (`/public`)
-
-| Method | Endpoint | Access | Description |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/public/{ws_uuid}/conversations` | Public | Create or reuse a 24-hour visitor conversation thread |
-| `POST` | `/public/{ws_uuid}/conversations/{id}/messages` | Public | Send visitor message & receive AI response |
-| `GET` | `/public/{ws_uuid}/conversations/{id}/messages` | Public | Poll message history for active conversation |
-
-### 5. Live Inbox & Operator Takeover (`/conversations`)
-
-| Method | Endpoint | Access | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/conversations` | Member | List workspace conversation threads with pagination |
-| `GET` | `/conversations/{id}/messages` | Member | Fetch full transcript history for conversation |
-| `POST` | `/conversations/{id}/assign` | Member | Claim session / Assign human operator (`status="human"`) |
-| `POST` | `/conversations/{id}/messages` | Member | Send human agent response to visitor |
-| `POST` | `/conversations/{id}/resolve` | Member | Resolve & close conversation session |
-| `POST` | `/conversations/{id}/mark-read` | Member | Mark conversation read for current agent |
-
-### 6. Integrations & Code Snippets (`/integrations`)
-
-| Method | Endpoint | Access | Description |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/integrations/snippet` | Member | Fetch multi-platform embed script (`html`, `react`, `nextjs`, `other`) |
+| **Frontend Framework** | Next.js (App Router) | 14.x | SSR, Client Components, Dynamic Routing |
+| **UI Library & Icons** | React & Lucide React | 18.x / 0.400+ | Component rendering & icon design |
+| **Styling Engine** | Vanilla CSS Tokens & Tailwind Utilities | Custom | Glassmorphism dark mode, animations |
+| **Server State Caching** | TanStack Query | v5.x | Data fetching, deduplication, prefetching |
+| **Client & UI State** | Zustand | v4.x | Modals, filters, sidebar toggles |
+| **Application State** | Redux Toolkit | v2.x | Auth tokens, user profiles, workspaces |
+| **Backend API Server** | Python & FastAPI | 3.11 / 0.110+ | High-performance async REST endpoints |
+| **Relational Database** | Neon PostgreSQL | 16.x | Multi-tenant database & `pgvector` storage |
+| **ORM & Database Driver** | SQLAlchemy & Asyncpg | 2.0.x / 0.29+ | Non-blocking async database operations |
+| **Cache & Rate Limiting** | Upstash Redis | Serverless | Token bucket rate limiting, session caching |
+| **Cloud File Storage** | Cloudinary | API v2 | Uploaded PDF/DOCX document storage |
+| **LLM Inference** | Groq & OpenAI API | Latest | Llama-3.3-70b, Llama-3.1-8b, gpt-4o-mini |
+| **Vector Embeddings** | OpenAI Embeddings | `text-embedding-3-small` | 1536-dimensional floating point vectors |
 
 ---
 
-## 🛠️ Verification & Bug Resolution History
+## 5. Frontend App Router Structure & Pages
 
-During development and testing, several critical bugs were identified and systematically resolved:
-
-### 1. Non-Blocking Crawl & Ingestion Architecture
-* **Symptom**: `POST /sources/web` took 12.6s to return and blocked concurrent `GET` requests in `Pending` state.
-* **Root Cause**: Web crawling and vector chunking ran synchronously inside the HTTP handler while holding the DB session open. `urllib.robotparser` executed blocking network calls on FastAPI's main asyncio loop.
-* **Fix Applied**: 
-  * Converted `POST /sources/web` and `POST /sources/files` to return `status="pending"` in **< 50ms**.
-  * Offloaded crawling and chunking to background tasks (`AsyncSessionLocal()`).
-  * Wrapped `fetch_robots_checker` in `asyncio.to_thread`.
-
-### 2. SourceFile Model Column Mapping
-* **Symptom**: `TypeError: 'file_size_bytes' is an invalid keyword argument for SourceFile`.
-* **Root Cause**: `SourceFile` ORM model was missing `file_size_bytes`, `cloudinary_url`, and `storage_url` attributes.
-* **Fix Applied**: Added missing fields to `SourceFile` model in `core.py` and auto-executed PostgreSQL `ALTER TABLE` migrations.
-
-### 3. Dynamic RAG Grounding & Scaffolding Cleanup
-* **Symptom**: All visitor questions returned the exact same raw resume header text.
-* **Root Cause**: `agent_graph.py` had a scaffolding fallback (`return f"Based on our knowledge base:\n\n{summary}"`) when `OPENAI_API_KEY` evaluated to mock. `similarity_threshold` was set too high (`0.7`).
-* **Fix Applied**:
-  * Removed scaffolding placeholder completely.
-  * Implemented grounding-strict system prompt using OpenAI `gpt-4o-mini`.
-  * Added natural greeting detection (`hi`, `hello`) and query term sentence synthesis fallback.
-  * Reduced chunk size to 250 tokens in `source_service.py` for fine-grained retrieval.
-
-### 4. End-to-End Measure-Then-Fix Performance Optimization
-* **Root Cause**: Vector searches on `knowledge_chunks` were performing full sequential scans (`Seq Scan`) due to missing HNSW index. Cloudinary uploads held open DB transactions causing `ConnectionDoesNotExistError`. Parallel React page loads triggered race condition 401 logouts during token rotation.
-* **Fix Applied**:
-  * **HNSW Vector Index**: Added `idx_knowledge_chunks_embedding_hnsw` on `knowledge_chunks.embedding` using `vector_cosine_ops` via Alembic migration (`0002_performance_indexes.py`), accelerating vector search from **48.3ms to 0.52ms (93x faster)**.
-  * **Multi-Tenant B-Tree Indexes**: Added foreign key indexes on `workspace_id` across `sources_web`, `sources_files`, `widget_configs`, `api_keys`, `webhooks`, `subscriptions`, `team_members`, and composite indexes on `conversations(workspace_id, created_at DESC)` and `messages(conversation_id, created_at DESC)`.
-  * **Decoupled Embedding Computation**: Moved vector embedding generation and Cloudinary network calls outside open DB transactions, eliminating idle socket drops.
-  * **Redis & In-Memory Caching**: Implemented `cache_service.py` caching for `GET /billing/plans` (1h TTL), `GET /widget/config` (60s TTL + invalidation), and `GET /analytics/summary` (5m TTL), dropping response times to **~1ms**.
-  * **Auth Grace Window**: Added 30-second grace window to `rotate_refresh_token` in `auth_service.py` to prevent duplicate concurrent React component refresh requests from invalidating user sessions.
-  * **GZip & Process Timing**: Added `GZipMiddleware` (compression for responses > 1KB) and process timing middleware (`X-Process-Time` header) to FastAPI in `main.py`.
-
-### 5. Instant Optimistic UI & Thread Reuse in Widget Preview
-* **Symptom**: Messages sent in the live widget customization preview showed a ~1.5s delay before appearing, and each sent message created duplicate conversation threads.
-* **Root Cause**: The widget preview relied entirely on background polling intervals to render sent visitor messages.
-* **Fix Applied**: 
-  * Updated `handleSendPreviewMessage` in `page.tsx` to optimistically append visitor messages to React state immediately.
-  * Reused active `previewConvId` across preview messages to keep conversation threads unified.
-
-### 6. Multi-Model LLM Fallback & Direct Knowledge Chunk Extraction
-* **Symptom**: Chatbot returned generic technical fallback error (*"I apologize, but I ran into a technical issue..."*) when asking questions about uploaded PDF resumes.
-* **Root Cause**: If an external LLM key failed or vector distance fell below strict 0.5 threshold (e.g. mock vectors or specialized document formatting), the pipeline triggered immediate human escalation.
-* **Fix Applied**:
-  * Added resilient candidate LLM model chain (`llama-3.3-70b-versatile` $\rightarrow$ `llama-3.1-8b-instant` $\rightarrow$ `gpt-4o-mini`).
-  * Implemented **Direct Knowledge Chunk Extraction Fallback**: If external LLMs are unreachable, the system extracts text directly from top matching document chunks so visitors always receive a response.
-  * Added workspace chunk retrieval fallback in `retrieve_knowledge_chunks` so uploaded resume content is never missed when vector similarity score is low.
-
-### 7. Timestamp Serialization AttributeError Resolution
-* **Symptom**: `AttributeError: 'NoneType' object has no attribute 'isoformat'` in `post_public_message`.
-* **Root Cause**: `user_msg` was committed to the database without calling `await db.refresh(user_msg)`, causing `user_msg.created_at` to remain `None` before string formatting.
-* **Fix Applied**: Added `await db.refresh(user_msg)` after commit and wrapped all timestamp serializations with null-safe `(user_msg.created_at or utc_now()).isoformat()`.
-
----
-
-## ⚡ Deployment & Running Locally
-
-### Backend Server (FastAPI)
-```bash
-cd apps/api
-source venv/Scripts/activate  # On Windows
-uvicorn apps.api.src.main:app --reload --port 8000
+```text
+apps/web/src/app/
+ ├── (auth)/                    # Authentication Route Group
+ │    ├── login/                # User Login Page
+ │    ├── signup/               # New User Registration Page
+ │    ├── callback/             # Email Auth Callback
+ │    └── google/callback/      # Google OAuth Callback
+ ├── (dashboard)/               # Dashboard Layout Group
+ │    ├── layout.tsx            # Static Sidebar & Header Layout Shell
+ │    └── dashboard/
+ │         ├── page.tsx         # Overview Analytics & Conversations Summary
+ │         ├── inbox/           # Live Operator Inbox & Session Takeover
+ │         ├── knowledge/       # Knowledge Base PDF/DOCX Ingestion & Web Crawler
+ │         ├── widget/          # AI Widget Configuration Studio (2-Column Sticky)
+ │         ├── analytics/       # Performance Metrics, Trends & Top Questions
+ │         ├── team/            # Team Member Roles, Access & Invites
+ │         ├── billing/         # Subscription Plans & Upgrade Checkout
+ │         └── settings/        # Workspace Preferences & API Key Generator
+ ├── onboarding/                # Multi-Step Business Onboarding Wizard
+ │    ├── page.tsx              # Onboarding Start & Choice
+ │    ├── business/             # Business Profile Setup (Name, URL, Industry)
+ │    ├── subscription/         # Plan Tier Selection
+ │    └── subscription/success/ # Stripe Checkout Success & Polling
+ └── invite/[token]/            # Team Member Invitation Acceptance
 ```
 
-### Frontend Server (Next.js 14)
-```bash
-cd apps/web
-npm run dev
-```
+---
 
-### Access Ports & Routes:
-- **Frontend Dashboard**: `http://localhost:3000`
-- **Backend API**: `http://localhost:8000`
-- **Swagger Documentation**: `http://localhost:8000/docs`
-- **Widget Loader Script**: `http://localhost:8000/widget/loader.js`
+## 6. AI Widget Configuration Studio Architecture
+
+```text
+┌───────────────────────────────┬────────────────────────────┐
+│  Left Column (Scrollable)     │  Right Column (Sticky)     │
+│                               │                            │
+│  [ Header & Save Status ]     │  [ Live Preview Studio ]   │
+│  [ Section Navigation Bar ]   │  [ Desktop | Mobile Frame ]│
+│                               │                            │
+│  #1 Brand Identity & Theme    │  ┌──────────────────────┐  │
+│  #2 Greeting & Welcome        │  │ Floating Chat Widget │  │
+│  #3 Quick Action Suggestions  │  │ Live Interactive     │  │
+│  #4 Embed Script Installation │  └──────────────────────┘  │
+└───────────────────────────────┴────────────────────────────┘
+```
 
 ---
 
-## 🎯 Conclusion
+## 7. Modular AI Chat Component Suite
 
-The **SupportAI Platform** is fully implemented, verified, and optimized. All core features — including multi-tenant workspace isolation, HNSW vector search, non-blocking RAG ingestion, grounding-strict AI answering, realtime widget customization preview, and live operator session takeover — are fully operational and documented.
+```text
+src/components/chat/
+ ├── AssistantAvatar.tsx       # AI bot avatar with status indicator
+ ├── ChatHeader.tsx            # Header with avatar, status badge, expand toggle & confirmation reset modal
+ ├── ChatTypingIndicator.tsx   # Staggered 3-dot CSS animated pulse indicator (●  ●  ●)
+ ├── ChatMessageItem.tsx       # Message bubble with Markdown formatting, code copy buttons & action bar
+ ├── ChatQuickSuggestions.tsx  # Initial prompt suggestion chips (Track Order, Billing, FAQs)
+ └── ChatInputArea.tsx         # Auto-resizing textarea with Enter-to-send, Shift+Enter newline & Stop/Send button
+```
+
+---
+
+## 8. Frontend State & Zero-Flash Hydration Architecture
+
+- **Zero Default-Value Flash**: `<WidgetSetupSkeleton />` prevents rendering uninitialized fake form defaults (e.g. blue `#4F46E5` flashing to gold `#D4AF37`).
+- **Link Hover Prefetching**: Sidebar navigation links in `DashboardLayout` pre-fetch server data on mouse hover (`queryClient.prefetchQuery`).
+- **Quiet Debounced Autosave**: Form changes execute 800ms quiet debouncing with `isDirty` tracking before sending HTTP `PATCH /widget/config`.
+
+---
+
+## 9. Complete Backend REST API Endpoint Map
+
+| Category | Endpoint | Method | Description |
+| :--- | :--- | :--- | :--- |
+| **Auth** | `/auth/login` | `POST` | User authentication & JWT generation |
+| **Auth** | `/auth/signup` | `POST` | User registration |
+| **Auth** | `/auth/me` | `GET` | Current authenticated user profile |
+| **Workspaces** | `/workspaces` | `GET / POST` | List user workspaces / Create step 1 workspace |
+| **Workspaces** | `/workspaces/setup` | `POST` | Setup complete workspace profile |
+| **Conversations** | `/conversations` | `GET` | List workspace active customer conversations |
+| **Conversations** | `/conversations/{id}/messages` | `GET / POST` | Fetch transcript messages / Send agent message reply |
+| **Conversations** | `/conversations/{id}/assign` | `POST` | Assign agent & initiate human takeover |
+| **Conversations** | `/conversations/{id}/resolve` | `POST` | Resolve customer conversation |
+| **Public Widget**| `/public/{embed_id}/conversations` | `POST` | Initialize visitor public chat session |
+| **Public Widget**| `/public/{embed_id}/conversations/{id}/messages` | `GET / POST` | Stream public chat messages & trigger AI generator |
+| **Widget Config**| `/widget/config` | `GET / PATCH` | Fetch / Update widget customization settings |
+| **Sources** | `/sources/web` | `GET / POST` | List web sources / Trigger domain web crawler |
+| **Sources** | `/sources/files` | `GET / POST` | Upload PDF/DOCX document & vectorize embeddings |
+| **Team** | `/team/members` | `GET` | List workspace team members & roles |
+| **Team** | `/team/invites` | `POST` | Send team member email invitation |
+| **Analytics** | `/analytics/summary` | `GET` | Overview metrics (total chats, resolution rate, AI accuracy) |
+| **Analytics** | `/analytics/top-questions` | `GET` | Frequent customer inquiry analysis |
+| **Settings** | `/settings/api-keys` | `GET / POST` | Generate & manage developer API keys |
+| **Billing** | `/billing/subscription` | `GET` | Fetch active subscription tier & message quotas |
+
+---
+
+## 10. PostgreSQL Schema, Models & Vector Indexes
+
+```text
+┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│    Users     │────<│ TeamMembers  │>────│  Workspaces  │
+└──────────────┘     └──────────────┘     └──────────────┘
+                                                 │
+                                                 ├──< Business
+                                                 ├──< WidgetConfig
+                                                 ├──< SourceWeb
+                                                 ├──< SourceFile
+                                                 ├──< KnowledgeChunk (pgvector 1536-dim)
+                                                 ├──< Conversation
+                                                 │       └──< Message
+                                                 └──< Subscription
+```
+
+---
+
+## 11. Verification Checklist & Git Log
+
+- **Commit `dd19eb70`**: `feat: implement widget service, dashboard layout, and foundational chat and setup components`
+- **Compiler Status**: 0 TypeScript errors across `apps/web`.
+- **Backend Status**: FastAPI server running cleanly on `http://localhost:8000`.
+- **Frontend Server**: Next.js 14 dev server running on `http://localhost:3000`.

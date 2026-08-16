@@ -1,14 +1,5 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
-
-export default function WidgetCustomizationRedirectPage() {
-  const router = useRouter();
-
-  useEffect(() => {
-    router.replace("/dashboard/widget");
-  }, [router]);
-
-  return null;
+export default function LegacyWidgetCustomizationRedirect() {
+  redirect("/dashboard/widget");
 }

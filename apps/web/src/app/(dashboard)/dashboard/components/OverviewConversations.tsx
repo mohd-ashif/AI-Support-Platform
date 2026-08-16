@@ -54,7 +54,13 @@ export const OverviewConversations: React.FC<OverviewConversationsProps> = ({ co
             </thead>
             <tbody className="divide-y divide-[#1A1A1A]">
               {conversations.map((c) => {
-                const visitorLabel = c.visitor || c.visitor_id || "Anonymous Visitor";
+                const visitorLabel =
+                  c.visitor ||
+                  (c.visitor_id
+                    ? c.visitor_id.startsWith("visitor_") || c.visitor_id.length > 12
+                      ? `Visitor #${c.visitor_id.slice(-6)}`
+                      : c.visitor_id
+                    : "Anonymous Visitor");
                 const topicLabel = c.topic || c.last_message_preview || "General Inquiry";
                 const timeLabel =
                   c.time ||

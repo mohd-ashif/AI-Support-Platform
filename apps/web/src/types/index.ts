@@ -130,8 +130,13 @@ export interface TopQuestionItem {
 export interface AnalyticsSummary {
   total_conversations: number;
   overall_resolution_rate: number;
+  ai_resolution_rate?: number;
   avg_response_ms: number;
+  avg_response_speed_ms?: number;
   csat_score?: number | null;
+  conversations_change?: number;
+  resolution_rate_change?: number;
+  speed_change_ms?: number;
   series: AnalyticsDailyPoint[];
   top_questions: TopQuestionItem[];
 }
