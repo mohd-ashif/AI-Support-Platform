@@ -15,6 +15,7 @@ import { widgetService } from "@/services/widgetService";
 import { teamService } from "@/services/teamService";
 import { inboxService } from "@/services/inboxService";
 import { analyticsService } from "@/services/analyticsService";
+import { useDashboardSocket } from "@/hooks/useDashboardSocket";
 import {
   Bot,
   LayoutDashboard,
@@ -39,6 +40,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const dispatch = useDispatch();
   const toast = useToast();
   const queryClient = useQueryClient();
+
+  // Connect real-time WebSocket listener for live dashboard metrics
+  useDashboardSocket();
 
   const user = useSelector((state: RootState) => state.auth.user);
   const workspaces = useSelector((state: RootState) => state.auth.workspaces || []);
