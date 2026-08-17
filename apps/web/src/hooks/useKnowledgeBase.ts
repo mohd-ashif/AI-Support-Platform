@@ -1,87 +1,93 @@
+import { useState } from "react";
 import { useSelector } from "react-redux";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { RootState } from "@/store";
-import {
-  useWebSources,
-  useFileSources,
-  useCrawlWebSourceMutation,
-  useUploadFileSourceMutation,
-  useDeleteWebSourceMutation,
-  useDeleteFileSourceMutation,
-} from "@/hooks/queries/useSourcesQueries";
-import { formatBytes } from "@/lib/utils/format";
-import { KnowledgeSourceItem } from "@/features/knowledge-base/SourcesListTable";
+import { knowledgeService, UnifiedKnowledgeSource, AdminSearchResponse } from "@/services/knowledgeService";
+import { queryKeys } from "@/lib/queryKeys";
 
-/**
- * Unified Knowledge Base & RAG Training Feature Hook.
- * Connects page UI components to server API state via TanStack Query.
- */
 export function useKnowledgeBase(workspaceId?: string) {
   const selectedWorkspace = useSelector((state: RootState) => state.auth.selectedWorkspace);
   const activeWsId = workspaceId || selectedWorkspace?.id;
+  const queryClient = useQueryClient();
 
-  const { data: webSources = [], isLoading: loadingWeb, refetch: refetchWeb } = useWebSources(activeWsId);
-  const { data: fileSources = [], isLoading: loadingFiles, refetch: refetchFiles } = useFileSources(activeWsId);
+  const [searchQuery, setSearchQuery] = useState("");
 
-  const crawlMutation = useCrawlWebSourceMutation(activeWsId);
-  const uploadMutation = useUploadFileSourceMutation(activeWsId);
-  const deleteWebMutation = useDeleteWebSourceMutation(activeWsId);
-  const deleteFileMutation = useDeleteFileSourceMutation(activeWsId);
+  const {
+    data: sources = [],
+    isLoading,
+    refetch,
+  } = useQuery({
+    queryKey: ["knowledge_sources", activeWsId],
+    queryFn: () => knowledgeService.getUnifiedSources(activeWsId),
+    enabled: Boolean(activeWsId),
+    refetchInterval: 5000, // Poll every 5s for active indexing status updates
+  });
 
-  const isLoading = loadingWeb || loadingFiles;
-  const isActionPending =
-    crawlMutation.isPending ||
-    uploadMutation.isPending ||
-    deleteWebMutation.isPending ||
-    deleteFileMutation.isPending;
+  const {
+    data: searchResults,
+    isLoading: isSearching,
+    refetch: executeSearch,
+  } = useQuery({
+    queryKey: ["knowledge_admin_search", activeWsId, searchQuery],
+    queryFn: () => knowledgeService.adminKnowledgeSearch(searchQuery, 5, activeWsId),
+    enabled: Boolean(activeWsId && searchQuery.trim().length >= 2),
+  });
 
-  const allSources: KnowledgeSourceItem[] = [
-    ...webSources.map((s) => ({
-      id: s.id,
-      type: "web" as const,
-      name: s.url,
-      info: `${s.page_count || 0} pages indexed`,
-      status: s.status,
-    })),
-    ...fileSources.map((s) => ({
-      id: s.id,
-      type: "file" as const,
-      name: s.filename,
-      info: formatBytes(s.file_size_bytes || 0),
-      status: s.status,
-    })),
-  ];
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => knowledgeService.uploadDocument(file, activeWsId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge_sources", activeWsId] });
+    },
+  });
 
-  const crawlWebsite = async (url: string) => {
-    return crawlMutation.mutateAsync(url);
-  };
+  const genericSourceMutation = useMutation({
+    mutationFn: (payload: { type: string; name: string; content?: string; url?: string }) =>
+      knowledgeService.createGenericSource(payload, activeWsId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge_sources", activeWsId] });
+    },
+  });
 
-  const uploadDocument = async (file: File) => {
-    return uploadMutation.mutateAsync(file);
-  };
+  const reindexMutation = useMutation({
+    mutationFn: (sourceId: string) => knowledgeService.reindexSource(sourceId, activeWsId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge_sources", activeWsId] });
+    },
+  });
 
-  const deleteSource = async (id: string, type: "web" | "file") => {
-    if (type === "web") {
-      return deleteWebMutation.mutateAsync(id);
-    }
-    return deleteFileMutation.mutateAsync(id);
-  };
+  const deleteMutation = useMutation({
+    mutationFn: (sourceId: string) => knowledgeService.deleteSource(sourceId, activeWsId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge_sources", activeWsId] });
+    },
+  });
 
-  const refresh = () => {
-    refetchWeb();
-    refetchFiles();
-  };
+  const uploadDocument = async (file: File) => uploadMutation.mutateAsync(file);
+  const addUrlSource = async (url: string) => genericSourceMutation.mutateAsync({ type: "URL", name: url, url });
+  const addFaqSource = async (question: string, answer: string) =>
+    genericSourceMutation.mutateAsync({ type: "FAQ", name: question, content: `Q: ${question}\nA: ${answer}` });
+  const addArticleSource = async (title: string, body: string) =>
+    genericSourceMutation.mutateAsync({ type: "ARTICLE", name: title, content: body });
+  const reindexSource = async (sourceId: string) => reindexMutation.mutateAsync(sourceId);
+  const deleteSource = async (sourceId: string) => deleteMutation.mutateAsync(sourceId);
 
   return {
-    webSources,
-    fileSources,
-    allSources,
+    sources,
     isLoading,
-    isActionPending,
-    isCrawling: crawlMutation.isPending,
     isUploading: uploadMutation.isPending,
-    crawlWebsite,
+    isCreatingSource: genericSourceMutation.isPending,
+    isReindexing: reindexMutation.isPending,
+    searchQuery,
+    setSearchQuery,
+    searchResults,
+    isSearching,
     uploadDocument,
+    addUrlSource,
+    addFaqSource,
+    addArticleSource,
+    reindexSource,
     deleteSource,
-    refresh,
+    refresh: refetch,
+    executeSearch,
   };
 }
