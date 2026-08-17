@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     GROQ_API_KEY: str = ""
     USE_MOCK_EMBEDDINGS: bool = False
+    RAG_CHUNK_SIZE: int = 250
+    RAG_CHUNK_OVERLAP: int = 30
 
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587

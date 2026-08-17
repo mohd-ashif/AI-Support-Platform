@@ -37,6 +37,7 @@ try:
         integrations,
         settings as settings_router,
         notifications,
+        knowledge,
     )
 except ModuleNotFoundError:
     from src.config.settings import settings
@@ -55,6 +56,7 @@ except ModuleNotFoundError:
         onboarding,
         integrations,
         settings as settings_router,
+        knowledge,
     )
 
 logger = logging.getLogger("main")
@@ -118,6 +120,7 @@ app.include_router(integrations.router)
 app.include_router(public_chat.router)
 app.include_router(settings_router.router)
 app.include_router(notifications.router)
+app.include_router(knowledge.router)
 
 @app.on_event("startup")
 async def on_startup():

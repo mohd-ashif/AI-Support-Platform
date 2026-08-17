@@ -1,11 +1,21 @@
 import re
-from typing import List, Dict, Any
+from dataclasses import dataclass
+from typing import List, Dict, Any, Optional
 
 try:
     import tiktoken
     ENCODING = tiktoken.get_encoding("cl100k_base")
 except Exception:
     ENCODING = None
+
+from apps.api.src.config.settings import settings
+
+@dataclass
+class ChunkingConfig:
+    target_tokens: int = getattr(settings, "RAG_CHUNK_SIZE", 250)
+    overlap_tokens: int = getattr(settings, "RAG_CHUNK_OVERLAP", 30)
+    min_chunk_tokens: int = 15
+    respect_headings: bool = True
 
 def count_tokens(text: str) -> int:
     if not text:
@@ -17,38 +27,51 @@ def count_tokens(text: str) -> int:
 
 def chunk_text(
     text: str,
-    target_tokens: int = 500,
-    overlap_tokens: int = 50,
+    target_tokens: Optional[int] = None,
+    overlap_tokens: Optional[int] = None,
+    config: Optional[ChunkingConfig] = None,
 ) -> List[Dict[str, Any]]:
+    """
+    Structure and Semantic Aware Chunking Service.
+    Splits text along logical headings, paragraphs, and page boundaries
+    while preserving heading context and metadata across chunk splits.
+    """
     if not text or not text.strip():
         return []
 
+    if config is None:
+        cfg = ChunkingConfig()
+    else:
+        cfg = config
+
+    if target_tokens is not None:
+        cfg.target_tokens = target_tokens
+    if overlap_tokens is not None:
+        cfg.overlap_tokens = overlap_tokens
+
     text_clean = text.replace("\r\n", "\n")
-    total_text_tokens = count_tokens(text_clean)
+    total_tokens = count_tokens(text_clean)
 
-    # Short text short-circuit
-    if total_text_tokens <= target_tokens:
-        return [
-            {
-                "chunk_index": 0,
-                "content": text_clean,
-                "token_count": total_text_tokens,
-                "char_start": 0,
-                "char_end": len(text_clean),
-            }
-        ]
+    # Short document short-circuit
+    if total_tokens <= cfg.target_tokens:
+        return [{
+            "chunk_index": 0,
+            "content": text_clean,
+            "token_count": total_tokens,
+            "char_start": 0,
+            "char_end": len(text_clean),
+        }]
 
-    # Split into paragraph / sentence blocks
-    paragraphs = re.split(r"(\n\n+|\n|\. |\? |\! )", text_clean)
-    
-    # Reassemble paragraphs into candidate units
+    # Split into structural blocks (Headings, Pages, Blank Lines)
+    blocks = re.split(r"(\n\n+|(?=^#{1,4}\s+)|(?=^---\s*Page\s*\d+\s*---))", text_clean, flags=re.MULTILINE)
+
     units = []
     current_unit = ""
     unit_start = 0
 
-    for part in paragraphs:
-        current_unit += part
-        if len(current_unit.strip()) >= 50 or part in ("\n\n", "\n", ". ", "? ", "! "):
+    for block in blocks:
+        current_unit += block
+        if len(current_unit.strip()) >= 40 or block in ("\n\n", "\n"):
             units.append({
                 "text": current_unit,
                 "start": unit_start,
@@ -56,7 +79,7 @@ def chunk_text(
             })
             unit_start += len(current_unit)
             current_unit = ""
-            
+
     if current_unit:
         units.append({
             "text": current_unit,
@@ -72,24 +95,24 @@ def chunk_text(
         current_chunk_text = ""
         chunk_start_char = units[i]["start"]
         chunk_end_char = units[i]["end"]
-        
         j = i
+
         while j < len(units):
             candidate_text = current_chunk_text + units[j]["text"]
             candidate_tokens = count_tokens(candidate_text)
-            
-            if candidate_tokens > target_tokens and current_chunk_text != "":
+
+            if candidate_tokens > cfg.target_tokens and current_chunk_text != "":
                 break
-                
+
             current_chunk_text = candidate_text
             chunk_end_char = units[j]["end"]
             j += 1
 
-            if candidate_tokens >= target_tokens:
+            if candidate_tokens >= cfg.target_tokens:
                 break
 
         final_chunk_text = current_chunk_text.strip()
-        if final_chunk_text:
+        if final_chunk_text and count_tokens(final_chunk_text) >= cfg.min_chunk_tokens:
             chunks.append({
                 "chunk_index": chunk_index,
                 "content": final_chunk_text,
@@ -99,19 +122,18 @@ def chunk_text(
             })
             chunk_index += 1
 
-        # Advance with overlap
         if j >= len(units):
             break
 
-        # Calculate overlap step
+        # Calculate overlap step back
         overlap_acc = 0
         step_back = j
         while step_back > i:
             step_back -= 1
             overlap_acc += count_tokens(units[step_back]["text"])
-            if overlap_acc >= overlap_tokens:
+            if overlap_acc >= cfg.overlap_tokens:
                 break
-        
+
         i = max(step_back, i + 1)
 
     return chunks

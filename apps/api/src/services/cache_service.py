@@ -309,3 +309,13 @@ def increment_version(workspace_id: str, resource: str) -> int:
 def invalidate_list(workspace_id: str, resource: str) -> int:
     """Sync alias for increment_version."""
     return increment_version(workspace_id, resource)
+
+
+def build_rag_cache_key(workspace_id: str, query: str, version: int = 1) -> str:
+    """Generates tenant-scoped RAG query cache key: rag:query:{workspace_id}:{version}:{query_hash}"""
+    q_hash = hashlib.sha256(query.strip().lower().encode("utf-8")).hexdigest()[:16]
+    return f"rag:query:{workspace_id}:v{version}:{q_hash}"
+
+async def async_invalidate_rag_cache(workspace_id: str) -> int:
+    """Invalidates RAG query cache version for a workspace whenever knowledge changes."""
+    return await async_increment_version(workspace_id, "knowledge_rag")

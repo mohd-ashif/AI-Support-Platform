@@ -283,6 +283,9 @@ async def send_public_message(
                                 await emit_to_conversation(conv.id, "conversation:status_changed", {"status": "human"})
                                 return
 
+                    from apps.api.src.services.citation_service import extract_verifiable_citations
+                    citations = extract_verifiable_citations(chunks)
+
                     chunks, max_confidence = await retrieve_knowledge_chunks(
                         workspace_id=ws.id,
                         query=payload.content,
@@ -301,6 +304,10 @@ async def send_public_message(
                     }
                     ai_text, should_esc = await run_reasoner_node(state, db=bg_db)
                     
+                    # Low confidence threshold triggers human handoff
+                    if max_confidence < 0.4:
+                        should_esc = True
+
                     # Do not escalate preview testing sessions
                     if payload.visitor_id.startswith("preview_visitor_"):
                         should_esc = False
@@ -325,6 +332,8 @@ async def send_public_message(
                         "content": ai_text,
                         "created_at": ai_msg.created_at.isoformat(),
                         "should_escalate": should_esc,
+                        "citations": citations,
+                        "confidence_score": max_confidence,
                     }
                     await emit_to_conversation(conv.id, "message:new", msg_payload)
                     await emit_to_workspace(ws.id, "message:new", msg_payload)

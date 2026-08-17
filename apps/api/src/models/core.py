@@ -125,15 +125,54 @@ class SourceFile(Base):
     error_message: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
+class KnowledgeSource(Base):
+    __tablename__ = "knowledge_sources"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
+    type: Mapped[str] = mapped_column(String, nullable=False) # FILE, URL, FAQ, ARTICLE, CSV, MARKDOWN
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="pending") # UPLOADING, PROCESSING, INDEXING, READY, FAILED, DISABLED
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+class KnowledgeDocument(Base):
+    __tablename__ = "knowledge_documents"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
+    source_id: Mapped[str] = mapped_column(String, ForeignKey("knowledge_sources.id"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    content_raw: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    content_clean: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+class DocumentVersion(Base):
+    __tablename__ = "document_versions"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
+    document_id: Mapped[str] = mapped_column(String, ForeignKey("knowledge_documents.id"), nullable=False, index=True)
+    version_number: Mapped[int] = mapped_column(Integer, default=1)
+    content_hash: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="active") # active, archived, superseded
+    indexed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
 class KnowledgeChunk(Base):
     __tablename__ = "knowledge_chunks"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
     workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
-    source_type: Mapped[str] = mapped_column(String, nullable=False) # web, file
+    source_type: Mapped[str] = mapped_column(String, nullable=False) # web, file, source, document
     source_id: Mapped[str] = mapped_column(String, nullable=False)
+    document_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("knowledge_documents.id"), nullable=True, index=True)
+    version_id: Mapped[Optional[str]] = mapped_column(String, ForeignKey("document_versions.id"), nullable=True, index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     embedding = mapped_column(EmbeddingType, nullable=True)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
+    metadata_json: Mapped[dict] = mapped_column(JSON, default=dict)
+
 
 
 class WidgetConfig(Base):

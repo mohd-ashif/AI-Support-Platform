@@ -288,3 +288,39 @@ def process_ai_response_task(self, conversation_id: str, visitor_message: str, w
     except Exception as exc:
         logger.error(f"[CELERY-AI] Error during AI response generation: {exc}")
 
+
+@celery_app.task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=5,
+    autoretry_for=(ConnectionError, TimeoutError),
+    retry_backoff=True,
+)
+def process_knowledge_document_task(self, source_id: str, document_id: str, version_id: str, workspace_id: str, source_type: str, raw_text: str, url: str = None):
+    """
+    Durable Celery task for unified Knowledge Document Ingestion.
+    Executes async extraction, cleaning, chunking, embedding, and vector insertion.
+    """
+    from apps.api.src.services.ingestion_service import ingest_knowledge_document_background
+
+    logger.info(f"[CELERY-TASK] Starting process_knowledge_document_task | source_id={source_id} | doc_id={document_id}")
+
+    loop = asyncio.get_event_loop() if asyncio.events._get_running_loop() else asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(
+            ingest_knowledge_document_background(
+                workspace_id=workspace_id,
+                source_id=source_id,
+                document_id=document_id,
+                version_id=version_id,
+                source_type=source_type,
+                raw_text=raw_text,
+                url=url,
+            )
+        )
+    except Exception as exc:
+        if isinstance(exc, (ConnectionError, TimeoutError)):
+            raise self.retry(exc=exc)
+        logger.error(f"[CELERY-TASK] Knowledge Document Ingestion error: {exc}")
+
+

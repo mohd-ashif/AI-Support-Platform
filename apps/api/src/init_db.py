@@ -40,6 +40,9 @@ async def init():
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_webhooks_workspace_id ON webhooks (workspace_id);"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_subscriptions_workspace_id ON subscriptions (workspace_id);"))
                 await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_team_members_workspace_id ON team_members (workspace_id);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_knowledge_sources_workspace_id ON knowledge_sources (workspace_id);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_knowledge_documents_workspace_id ON knowledge_documents (workspace_id);"))
+                await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_document_versions_workspace_id ON document_versions (workspace_id);"))
                 print("   [✓] HNSW vector index & B-Tree performance indexes created/verified.")
             except Exception as e:
                 print(f"   [!] Index note: {e}")
@@ -51,6 +54,10 @@ async def init():
                 await conn.execute(text("ALTER TABLE sources_web ADD COLUMN IF NOT EXISTS error_message VARCHAR;"))
                 await conn.execute(text("ALTER TABLE sources_files ADD COLUMN IF NOT EXISTS error_message VARCHAR;"))
                 await conn.execute(text("ALTER TABLE sources_files ADD COLUMN IF NOT EXISTS cloudinary_url VARCHAR DEFAULT '';"))
+                await conn.execute(text("ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS document_id VARCHAR;"))
+                await conn.execute(text("ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS version_id VARCHAR;"))
+                await conn.execute(text("ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS chunk_index INTEGER DEFAULT 0;"))
+                await conn.execute(text("ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS metadata_json JSON DEFAULT '{}';"))
             except Exception:
                 pass
     except Exception as e:
