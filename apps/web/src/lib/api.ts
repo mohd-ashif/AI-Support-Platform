@@ -8,6 +8,7 @@ export const setMemoryAccessToken = (token: string | null) => {
   if (typeof window !== "undefined") {
     if (token) {
       localStorage.setItem("access_token", token);
+      sessionStorage.removeItem("explicit_logout");
     } else {
       localStorage.removeItem("access_token");
     }
@@ -19,6 +20,16 @@ export const getMemoryAccessToken = () => {
     memoryAccessToken = localStorage.getItem("access_token");
   }
   return memoryAccessToken;
+};
+
+export const clearAllAuthStorage = () => {
+  memoryAccessToken = null;
+  memoryWorkspaceId = null;
+  if (typeof window !== "undefined") {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("workspace_id");
+    sessionStorage.setItem("explicit_logout", "true");
+  }
 };
 
 let memoryWorkspaceId: string | null = typeof window !== "undefined" ? localStorage.getItem("workspace_id") : null;

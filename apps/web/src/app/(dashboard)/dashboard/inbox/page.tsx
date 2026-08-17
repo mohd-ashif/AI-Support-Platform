@@ -12,10 +12,11 @@ import {
 } from "@/hooks/queries/useInboxQueries";
 import { inboxService, Conversation, Message } from "@/services/inboxService";
 import { useToast } from "@/components/ui/ToastProvider";
-import { MessageSquare, Bot, User, Send, CheckCircle2, ShieldAlert, Loader2, RefreshCw } from "lucide-react";
+import { MessageSquare, Bot, User, Send, CheckCircle2, ShieldAlert, Loader2, RefreshCw, Github } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/queryKeys";
+import { GitHubIssueModal } from "@/components/github/GitHubIssueModal";
 
 export default function LiveInboxPage() {
   const toast = useToast();
@@ -25,6 +26,7 @@ export default function LiveInboxPage() {
 
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
+  const [isGitHubIssueModalOpen, setIsGitHubIssueModalOpen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const socketRef = useRef<Socket | null>(null);
 
@@ -266,6 +268,16 @@ export default function LiveInboxPage() {
                       <span>Resolve</span>
                     </button>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={() => setIsGitHubIssueModalOpen(true)}
+                    className="px-3 py-1.5 rounded-lg bg-[#1F1F1F] hover:bg-[#D4AF37] text-neutral-200 hover:text-black border border-[#2B2B2B] text-xs font-extrabold transition-all flex items-center space-x-1.5"
+                    title="Create GitHub Issue from conversation transcript"
+                  >
+                    <Github className="h-3.5 w-3.5" />
+                    <span>Create GitHub Issue</span>
+                  </button>
                 </div>
               </div>
 
@@ -336,6 +348,15 @@ export default function LiveInboxPage() {
           )}
         </div>
       </div>
+
+      {/* GitHub Issue Creation Modal */}
+      {selectedConvId && (
+        <GitHubIssueModal
+          isOpen={isGitHubIssueModalOpen}
+          onClose={() => setIsGitHubIssueModalOpen(false)}
+          conversationId={selectedConvId}
+        />
+      )}
     </div>
   );
 }

@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = "mock-google-client-id"
     GOOGLE_CLIENT_SECRET: str = "mock-google-client-secret"
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/auth/google/callback"
+
+    GITHUB_CLIENT_ID: str = "mock-github-client-id"
+    GITHUB_CLIENT_SECRET: str = "mock-github-client-secret"
+    GITHUB_CALLBACK_URL: str = "http://localhost:8000/integrations/github/callback"
+    GITHUB_WEBHOOK_SECRET: str = "mock-github-webhook-secret"
+    ENCRYPTION_KEY: str = "super-secret-encryption-key-32-chars-long!"
+
     FRONTEND_URL: str = "http://localhost:3000"
     BACKEND_URL: str = "http://localhost:8000"
 

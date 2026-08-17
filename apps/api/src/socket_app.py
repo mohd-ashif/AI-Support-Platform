@@ -44,9 +44,9 @@ if sio is not None:
                 payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
                 user_id = payload.get("sub")
                 
-                # Resolve workspace from token payload or team member query
+                from sqlalchemy import select
                 from apps.api.src.database.session import AsyncSessionLocal
-                from apps.api.src.models.core import TeamMember, select
+                from apps.api.src.models.core import TeamMember
                 
                 async with AsyncSessionLocal() as db:
                     res = await db.execute(select(TeamMember).where(TeamMember.user_id == user_id))

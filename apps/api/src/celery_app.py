@@ -324,3 +324,30 @@ def process_knowledge_document_task(self, source_id: str, document_id: str, vers
         logger.error(f"[CELERY-TASK] Knowledge Document Ingestion error: {exc}")
 
 
+@celery_app.task(
+    bind=True,
+    max_retries=2,
+    default_retry_delay=5,
+    autoretry_for=(ConnectionError, TimeoutError),
+    retry_backoff=True,
+)
+def sync_github_repository_task(self, repo_id: str, workspace_id: str):
+    """
+    Durable Celery task for GitHub Repository Sync & Vector Indexing.
+    """
+    from apps.api.src.services.github_sync_service import execute_repository_sync_job
+
+    logger.info(f"[CELERY-TASK] Starting sync_github_repository_task | repo_id={repo_id} | workspace_id={workspace_id}")
+
+    loop = asyncio.get_event_loop() if asyncio.events._get_running_loop() else asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(
+            execute_repository_sync_job(workspace_id=workspace_id, repo_id=repo_id)
+        )
+    except Exception as exc:
+        if isinstance(exc, (ConnectionError, TimeoutError)):
+            raise self.retry(exc=exc)
+        logger.error(f"[CELERY-TASK] GitHub Repository Sync error: {exc}")
+
+
+

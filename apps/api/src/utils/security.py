@@ -36,7 +36,7 @@ def validate_password_rules(password: str) -> None:
         raise ValueError("Password must contain at least 1 number")
 
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
-    """Generates a short-lived 15-min JWT access token with sub, email, jti, iat, exp claims."""
+    """Generates a short-lived JWT access token or state token."""
     to_encode = data.copy()
     now = datetime.now(timezone.utc)
     if expires_delta:
@@ -44,20 +44,19 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     else:
         expire = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
+    token_type = to_encode.get("type", "access")
     to_encode.update({
         "exp": expire,
         "iat": now,
         "jti": str(uuid.uuid4()),
-        "type": "access",
+        "type": token_type,
     })
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 def decode_access_token(token: str) -> Optional[Dict[str, Any]]:
-    """Decodes and validates a JWT access token."""
+    """Decodes and validates a JWT access token or state token."""
     try:
         payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
-        if payload.get("type") != "access":
-            return None
         return payload
     except jwt.PyJWTError:
         return None

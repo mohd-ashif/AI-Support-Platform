@@ -11,6 +11,8 @@ import { useUIStore } from "@/stores/useUIStore";
 import { useToast } from "@/components/ui/ToastProvider";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/queryKeys";
+import { clearAllAuthStorage } from "@/lib/api";
+import { authService } from "@/services/authService";
 import { widgetService } from "@/services/widgetService";
 import { teamService } from "@/services/teamService";
 import { inboxService } from "@/services/inboxService";
@@ -72,14 +74,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
 
-  const handleLogout = async () => {
-    try {
-      await logoutMutation.mutateAsync();
-    } catch (e) {
-      // Ignore network errors on logout
-    }
+  const handleLogout = () => {
+    // 1. Immediately clear memory tokens, localStorage, and set explicit_logout flag
+    clearAllAuthStorage();
     dispatch(logoutUser());
+    queryClient.clear();
+
+    // 2. Fire backend /auth/logout to delete refresh_token cookie in background (non-blocking)
+    authService.logout().catch(() => {});
+
     toast.info("Logged out of session.");
+
+    // 3. Instant hard window redirect to /login (0ms delay)
     if (typeof window !== "undefined") {
       window.location.href = "/login";
     }

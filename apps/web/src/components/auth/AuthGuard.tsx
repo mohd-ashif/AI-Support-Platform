@@ -4,8 +4,8 @@ import React, { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useSelector, useDispatch } from "react-redux";
 import { RootState } from "@/store";
-import { setAuth } from "@/store/slices/authSlice";
-import { apiFetch, getMemoryAccessToken, setMemoryAccessToken } from "@/lib/api";
+import { setAuth, logoutUser } from "@/store/slices/authSlice";
+import { apiFetch, getMemoryAccessToken, setMemoryAccessToken, clearAllAuthStorage } from "@/lib/api";
 import { useCurrentUser } from "@/hooks/queries/useAuthQueries";
 import { useWorkspaces } from "@/hooks/queries/useWorkspaceQueries";
 import { NeuralNetworkLoader } from "@/components/ui/NeuralNetworkLoader";
@@ -43,30 +43,20 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      if (!getMemoryAccessToken()) {
-        try {
-          const res = await apiFetch("/auth/refresh", { method: "POST", skipAuthRefresh: true });
-          if (res?.access_token) {
-            setMemoryAccessToken(res.access_token);
-            const userRes = await apiFetch("/auth/me");
-            const workspacesRes = await apiFetch("/workspaces").catch(() => []);
-            dispatch(
-              setAuth({
-                user: userRes,
-                accessToken: res.access_token,
-                workspaces: workspacesRes || [],
-              })
-            );
-          }
-        } catch (err) {
-          // Session expired or unauthenticated
-        }
-      } else if (!isAuthenticated) {
+      const isExplicitLogout = typeof window !== "undefined" && sessionStorage.getItem("explicit_logout") === "true";
+      const token = getMemoryAccessToken();
+
+      // If user explicitly logged out or has no memory token, abort session restoration
+      if (isExplicitLogout || !token) {
+        setInitializing(false);
+        return;
+      }
+
+      if (!isAuthenticated && token) {
         try {
           const userRes = await apiFetch("/auth/me");
-          const token = getMemoryAccessToken();
           const workspacesRes = await apiFetch("/workspaces").catch(() => []);
-          if (token && userRes) {
+          if (userRes) {
             dispatch(
               setAuth({
                 user: userRes,
@@ -76,7 +66,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
             );
           }
         } catch (e) {
-          // Ignore background session restore failure
+          // Token invalid or session expired
+          clearAllAuthStorage();
+          dispatch(logoutUser());
         }
       }
       setInitializing(false);
@@ -92,9 +84,13 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     const isDashboardRoute = pathname.startsWith("/dashboard");
     const isOnboardingRoute = pathname.startsWith("/onboarding");
 
-    // 1. Unauthenticated users on protected routes
+    // 1. Unauthenticated users on protected routes -> Instant redirect
     if ((isDashboardRoute || isOnboardingRoute) && !isAuthenticated && !getMemoryAccessToken()) {
-      router.replace("/login");
+      if (typeof window !== "undefined") {
+        window.location.replace("/login");
+      } else {
+        router.replace("/login");
+      }
       return;
     }
 
@@ -140,6 +136,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const isDashboardRoute = pathname.startsWith("/dashboard");
   const isOnboardingRoute = pathname.startsWith("/onboarding");
   if ((isDashboardRoute || isOnboardingRoute) && !isAuthenticated && !getMemoryAccessToken()) {
+    if (typeof window !== "undefined" && window.location.pathname !== "/login") {
+      window.location.replace("/login");
+    }
     return <NeuralNetworkLoader size="fullscreen" text="Redirecting to login..." />;
   }
 

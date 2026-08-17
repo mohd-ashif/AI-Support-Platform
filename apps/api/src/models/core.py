@@ -276,3 +276,39 @@ class AuditLog(Base):
     resource_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class GitHubIntegration(Base):
+    __tablename__ = "github_integrations"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id"), nullable=False, unique=True, index=True)
+    github_user_id: Mapped[str] = mapped_column(String, nullable=False)
+    github_username: Mapped[str] = mapped_column(String, nullable=False)
+    github_avatar_url: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    access_token_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    refresh_token_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    token_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String, default="connected")  # connected, disconnected, expired
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class GitHubRepository(Base):
+    __tablename__ = "github_repositories"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=generate_uuid)
+    workspace_id: Mapped[str] = mapped_column(String, ForeignKey("workspaces.id"), nullable=False, index=True)
+    github_integration_id: Mapped[str] = mapped_column(String, ForeignKey("github_integrations.id"), nullable=False, index=True)
+    repository_id: Mapped[str] = mapped_column(String, nullable=False)
+    repository_name: Mapped[str] = mapped_column(String, nullable=False)
+    owner: Mapped[str] = mapped_column(String, nullable=False)
+    branch: Mapped[str] = mapped_column(String, default="main")
+    default_branch: Mapped[str] = mapped_column(String, default="main")
+    is_private: Mapped[bool] = mapped_column(Boolean, default=False)
+    sync_status: Mapped[str] = mapped_column(String, default="pending")  # pending, syncing, ready, failed, disconnected
+    sync_config_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_synced_commit: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    last_synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+

@@ -12,6 +12,7 @@ import { useToast } from "@/components/ui/ToastProvider";
 import { formatDate } from "@/lib/utils/format";
 import { TableSkeleton } from "@/components/ui/TableSkeleton";
 import { Settings, Key, Plus, Trash2, Copy, Check, ShieldCheck, Loader2, Building2 } from "lucide-react";
+import { GitHubConnectionCard } from "@/components/github/GitHubConnectionCard";
 
 export default function SettingsPage() {
   const toast = useToast();
@@ -105,6 +106,9 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      {/* GitHub Integration Card */}
+      <GitHubConnectionCard />
 
       {/* Organization & Workspace Details Profile */}
       <div className="bg-[#111111] border border-[#222222] rounded-2xl p-6 space-y-4">

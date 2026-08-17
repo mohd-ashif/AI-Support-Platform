@@ -1,12 +1,25 @@
 import React, { useState } from "react";
 import { AssistantAvatar } from "./AssistantAvatar";
-import { Copy, Check, ThumbsUp, ThumbsDown, RotateCcw } from "lucide-react";
+import { Copy, Check, ThumbsUp, ThumbsDown, RotateCcw, Github, ExternalLink, GitBranch, FileCode2 } from "lucide-react";
+
+export interface CitationItem {
+  documentName?: string;
+  url?: string;
+  sourceType?: string;
+  repository?: string;
+  branch?: string;
+  filePath?: string;
+  lineStart?: number;
+  lineEnd?: number;
+  symbol?: string;
+}
 
 export interface ChatMessage {
   id?: string;
   sender: "user" | "bot";
   content: string;
   timestamp?: string;
+  citations?: CitationItem[];
 }
 
 interface ChatMessageItemProps {
@@ -137,6 +150,56 @@ export const ChatMessageItem: React.FC<ChatMessageItemProps> = ({
           }`}
         >
           {renderFormattedContent(message.content)}
+
+          {/* GitHub Source Citations */}
+          {!isUser && message.citations && message.citations.length > 0 && (
+            <div className="mt-3 pt-2.5 border-t border-[#262626] space-y-2">
+              <span className="text-[10px] uppercase font-extrabold tracking-wider text-neutral-400 flex items-center space-x-1">
+                <Github className="h-3 w-3 text-[#D4AF37]" />
+                <span>Verified Sources ({message.citations.length})</span>
+              </span>
+
+              <div className="space-y-1.5">
+                {message.citations.map((cite, cIdx) => (
+                  <div
+                    key={cIdx}
+                    className="p-2 rounded-xl bg-[#0D0D0D] border border-[#1F1F1F] flex items-center justify-between text-[11px]"
+                  >
+                    <div className="flex items-center space-x-2 truncate pr-2">
+                      <FileCode2 className="h-3.5 w-3.5 text-[#D4AF37] shrink-0" />
+                      <div className="truncate">
+                        <span className="font-mono text-white font-bold">
+                          {cite.filePath || cite.documentName}
+                        </span>
+                        {cite.lineStart && (
+                          <span className="text-neutral-500 font-mono text-[10px] ml-1.5">
+                            (L{cite.lineStart}{cite.lineEnd ? `-L${cite.lineEnd}` : ""})
+                          </span>
+                        )}
+                        {cite.repository && (
+                          <span className="text-[10px] text-neutral-400 block truncate">
+                            {cite.repository} ({cite.branch || "main"})
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {cite.url && (
+                      <a
+                        href={cite.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="px-2 py-1 rounded-lg bg-[#1F1F1F] hover:bg-[#D4AF37] text-neutral-300 hover:text-black transition-all text-[10px] font-bold shrink-0 flex items-center space-x-1"
+                      >
+                        <span>View on GitHub</span>
+                        <ExternalLink className="h-2.5 w-2.5" />
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Compact Action Bar for Assistant Messages */}

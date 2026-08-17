@@ -3,6 +3,7 @@
 import React, { useState, useRef } from "react";
 import { useKnowledgeBase } from "@/hooks/useKnowledgeBase";
 import { useToast } from "@/components/ui/ToastProvider";
+import { GitHubConnectionCard } from "@/components/github/GitHubConnectionCard";
 import {
   BookOpen,
   FileText,
@@ -18,6 +19,7 @@ import {
   Clock,
   ExternalLink,
   Layers,
+  Github,
 } from "lucide-react";
 
 export default function KnowledgeBasePage() {
@@ -41,7 +43,7 @@ export default function KnowledgeBasePage() {
     refresh,
   } = useKnowledgeBase();
 
-  const [activeTab, setActiveTab] = useState<"documents" | "web" | "faq" | "inspector">("documents");
+  const [activeTab, setActiveTab] = useState<"documents" | "web" | "faq" | "github" | "inspector">("documents");
   const [urlInput, setUrlInput] = useState("");
   const [faqQuestion, setFaqQuestion] = useState("");
   const [faqAnswer, setFaqAnswer] = useState("");
@@ -196,6 +198,14 @@ export default function KnowledgeBasePage() {
           <HelpCircle className="h-4 w-4" /> FAQs & Articles
         </button>
         <button
+          onClick={() => setActiveTab("github")}
+          className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-colors ${
+            activeTab === "github" ? "bg-[#D4AF37] text-black" : "bg-[#141414] text-neutral-400 hover:text-white"
+          }`}
+        >
+          <Github className="h-4 w-4" /> GitHub Repositories
+        </button>
+        <button
           onClick={() => setActiveTab("inspector")}
           className={`flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg transition-colors ${
             activeTab === "inspector" ? "bg-[#D4AF37] text-black" : "bg-[#141414] text-neutral-400 hover:text-white"
@@ -204,6 +214,13 @@ export default function KnowledgeBasePage() {
           <Search className="h-4 w-4" /> RAG Inspector (Admin Search)
         </button>
       </div>
+
+      {/* TAB: GitHub Developer Connector */}
+      {activeTab === "github" && (
+        <div className="space-y-6">
+          <GitHubConnectionCard />
+        </div>
+      )}
 
       {/* TAB 1: Documents & Files */}
       {activeTab === "documents" && (

@@ -125,10 +125,22 @@ app.include_router(knowledge.router)
 @app.on_event("startup")
 async def on_startup():
     try:
+        from sqlalchemy import text
         from apps.api.src.database.session import engine, Base
         from apps.api.src.scripts.migrate_phase1_tenant_data import run_data_migration
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            for alter_sql in [
+                "ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS document_id VARCHAR;",
+                "ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS version_id VARCHAR;",
+                "ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS chunk_index INTEGER DEFAULT 0;",
+                "ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS metadata_json JSON DEFAULT '{}';",
+                "ALTER TABLE github_repositories ADD COLUMN IF NOT EXISTS error_message VARCHAR;",
+            ]:
+                try:
+                    await conn.execute(text(alter_sql))
+                except Exception:
+                    pass
         await run_data_migration()
         logger.info("[STARTUP] Phase 1 database schema & tenant data migration completed successfully.")
     except Exception as e:

@@ -54,6 +54,7 @@ export const authService = {
   async logout(): Promise<{ message: string }> {
     return apiFetch<{ message: string }>("/auth/logout", {
       method: "POST",
+      skipAuthRefresh: true,
     });
   },
 };
