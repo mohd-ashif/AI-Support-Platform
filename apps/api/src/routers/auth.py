@@ -230,23 +230,29 @@ async def google_callback(
                     "grant_type": "authorization_code",
                 },
             )
-            if token_resp.status_code == 200:
-                token_data = token_resp.json()
-                userinfo_resp = await client.get(
-                    "https://www.googleapis.com/oauth2/v3/userinfo",
-                    headers={"Authorization": f"Bearer {token_data.get('access_token')}"},
-                )
-                if userinfo_resp.status_code == 200:
-                    userinfo = userinfo_resp.json()
-                    email = userinfo.get("email")
-                    name = userinfo.get("name")
-                    google_id = userinfo.get("sub")
-                    avatar_url = userinfo.get("picture")
+            if token_resp.status_code != 200:
+                logger.error(f"Google token exchange failed: {token_resp.status_code} - {token_resp.text}")
+                err_detail = "Invalid Google OAuth client credentials"
+                try:
+                    err_detail = token_resp.json().get("error_description", err_detail)
+                except Exception:
+                    pass
+                raise HTTPException(status_code=400, detail=f"Google authentication failed: {err_detail}")
 
-        if not email:
-            email = f"google_user_{code[:8]}@example.com"
-            name = "Google User"
-            google_id = f"google_sub_{code[:8]}"
+            token_data = token_resp.json()
+            userinfo_resp = await client.get(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {token_data.get('access_token')}"},
+            )
+            if userinfo_resp.status_code != 200:
+                logger.error(f"Google userinfo request failed: {userinfo_resp.status_code} - {userinfo_resp.text}")
+                raise HTTPException(status_code=400, detail="Failed to retrieve Google user profile.")
+
+            userinfo = userinfo_resp.json()
+            email = userinfo.get("email")
+            name = userinfo.get("name")
+            google_id = userinfo.get("sub")
+            avatar_url = userinfo.get("picture")
 
         user = await auth_service.handle_google_user_info(
             db, email=email, name=name, google_id=google_id, avatar_url=avatar_url
