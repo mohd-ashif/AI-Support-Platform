@@ -201,11 +201,21 @@ async def handle_google_user_info(
     avatar_url: Optional[str] = None,
 ) -> User:
     norm_email = email.strip().lower()
-    user = await get_user_by_email(db, norm_email)
+
+    # Search by google_id first, then fallback to email
+    res = await db.execute(select(User).where(User.google_id == google_id))
+    user = res.scalars().first()
+
+    if not user:
+        user = await get_user_by_email(db, norm_email)
+
     if user:
-        if not user.google_id:
-            user.google_id = google_id
-        if avatar_url and not user.avatar_url:
+        user.google_id = google_id
+        if name and name != "Google User" and (not user.name or user.name == "Google User"):
+            user.name = name
+        if norm_email and "example.com" not in norm_email and ("example.com" in user.email or user.email.startswith("google_user_")):
+            user.email = norm_email
+        if avatar_url:
             user.avatar_url = avatar_url
         await db.commit()
         await db.refresh(user)
