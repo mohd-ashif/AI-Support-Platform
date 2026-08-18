@@ -6,9 +6,10 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy source files
-COPY . ./
+# Copy source files into both apps/api and root for module import resolution
+COPY . /app/apps/api
+COPY . /app
 
 ENV PYTHONPATH=/app
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "apps.api.src.main:app", "--host", "0.0.0.0", "--port", "8000"]
