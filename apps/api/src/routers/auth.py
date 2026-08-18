@@ -197,6 +197,16 @@ async def get_google_auth_url(request: Request):
     )
     return {"url": url}
 
+def get_effective_frontend_url(request: Request) -> str:
+    if settings.FRONTEND_URL and "localhost" not in settings.FRONTEND_URL and "127.0.0.1" not in settings.FRONTEND_URL:
+        return settings.FRONTEND_URL.rstrip("/")
+    origin = request.headers.get("origin") or request.headers.get("referer") or ""
+    if "vercel.app" in origin:
+        from urllib.parse import urlparse
+        parsed = urlparse(origin)
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return "https://ai-support-platform.vercel.app"
+
 @router.get("/google/callback")
 async def google_callback(
     code: str,
@@ -247,13 +257,15 @@ async def google_callback(
             db, user.id, user_agent=user_agent, ip_address=client_ip
         )
 
-        frontend_callback = f"{settings.FRONTEND_URL or 'http://localhost:3000'}/auth/callback"
+        frontend_base = get_effective_frontend_url(request)
+        frontend_callback = f"{frontend_base}/auth/callback"
         redirect_response = RedirectResponse(url=frontend_callback)
         set_refresh_cookie(redirect_response, refresh_token)
         return redirect_response
     except Exception as e:
         print(f"Google OAuth Callback Exception: {e}")
-        frontend_callback = f"{settings.FRONTEND_URL or 'http://localhost:3000'}/auth/callback"
+        frontend_base = get_effective_frontend_url(request)
+        frontend_callback = f"{frontend_base}/auth/callback"
         return RedirectResponse(url=frontend_callback)
 
 @router.post("/google", response_model=TokenResponse)
