@@ -20,12 +20,12 @@ export function useConversations(conversationId?: string, workspaceId?: string) 
   const { data: conversationDetail, isLoading: loadingDetail } =
     useConversationDetailQuery(conversationId, activeWsId);
 
-  const sendMutation = useSendMessageMutation(conversationId, activeWsId);
+  const sendMutation = useSendMessageMutation(activeWsId);
   const assignMutation = useAssignAgentMutation(activeWsId);
 
   const sendMessage = async (content: string) => {
     if (!conversationId) throw new Error("Conversation ID required to send message");
-    return sendMutation.mutateAsync({ content });
+    return sendMutation.mutateAsync({ conversationId, content });
   };
 
   const assignAgent = async (targetConvId: string, force: boolean = false) => {

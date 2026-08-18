@@ -55,3 +55,19 @@ export function useResolveConversationMutation(workspaceId?: string) {
     },
   });
 }
+
+// Aliases for live inbox feature integration
+export const useConversationsQuery = useConversations;
+export const useConversationDetailQuery = (conversationId?: string | null, workspaceId?: string) =>
+  useMessages(conversationId || null, workspaceId);
+export const useAssignAgentMutation = (workspaceId?: string) => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ conversationId, force }: { conversationId: string; force?: boolean }) =>
+      inboxService.takeoverConversation(conversationId, workspaceId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.inbox.conversations(workspaceId) });
+    },
+  });
+};
+
