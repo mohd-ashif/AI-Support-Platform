@@ -14,8 +14,15 @@ apps/api/.venv/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.render
+.env.vercel
 apps/api/.env
+apps/api/.env.render
 apps/web/.env
+apps/web/.env.vercel
+*.env.render
+*.env.vercel
+
 
 # Next.js build output
 .next/
@@ -61,3 +68,6 @@ scratch/
 http_test_result.json
 live_http_output.json
 groq_test_output.txt
+.antigravity/
+.gemini/
+.brain/

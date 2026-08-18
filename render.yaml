@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: supportai-api
+    env: python
+    region: singapore
+    plan: starter
+    buildCommand: "pip install -r apps/api/requirements.txt"
+    startCommand: "uvicorn apps.api.src.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PROJECT_NAME
+        value: "SupportAI Platform"
+      - key: JWT_ALGORITHM
+        value: "HS256"
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: "15"
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: "30"
