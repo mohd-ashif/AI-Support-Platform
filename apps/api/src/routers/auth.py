@@ -166,11 +166,15 @@ def get_effective_backend_url(request: Request) -> str:
         base = base.replace("http://", "https://")
     return base
 
+def get_google_redirect_uri(request: Request) -> str:
+    if settings.GOOGLE_REDIRECT_URI and "localhost" not in settings.GOOGLE_REDIRECT_URI and "127.0.0.1" not in settings.GOOGLE_REDIRECT_URI:
+        return settings.GOOGLE_REDIRECT_URI
+    return f"{get_effective_backend_url(request)}/auth/google/callback"
+
 @router.get("/google/start")
 async def google_start(request: Request):
     state = str(uuid.uuid4())
-    backend_url = get_effective_backend_url(request)
-    redirect_uri = f"{backend_url}/auth/google/callback"
+    redirect_uri = get_google_redirect_uri(request)
     url = (
         "https://accounts.google.com/o/oauth2/v2/auth?"
         f"client_id={settings.GOOGLE_CLIENT_ID}&"
@@ -183,8 +187,7 @@ async def google_start(request: Request):
 
 @router.get("/google/url")
 async def get_google_auth_url(request: Request):
-    backend_url = get_effective_backend_url(request)
-    redirect_uri = f"{backend_url}/auth/google/callback"
+    redirect_uri = get_google_redirect_uri(request)
     url = (
         "https://accounts.google.com/o/oauth2/v2/auth?"
         f"client_id={settings.GOOGLE_CLIENT_ID}&"
@@ -201,8 +204,7 @@ async def google_callback(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        backend_url = get_effective_backend_url(request)
-        redirect_uri = f"{backend_url}/auth/google/callback"
+        redirect_uri = get_google_redirect_uri(request)
         email, name, google_id, avatar_url = None, None, None, None
 
         async with httpx.AsyncClient(timeout=10.0) as client:
