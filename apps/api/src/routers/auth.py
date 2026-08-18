@@ -30,8 +30,8 @@ def set_refresh_cookie(response: Response, refresh_token: str):
         key=REFRESH_COOKIE_NAME,
         value=refresh_token,
         httponly=True,
-        secure=False,  # Set to True in production HTTPS
-        samesite="lax",
+        secure=True,
+        samesite="none",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
         path="/",
     )
@@ -41,7 +41,8 @@ def clear_refresh_cookie(response: Response):
         key=REFRESH_COOKIE_NAME,
         path="/",
         httponly=True,
-        samesite="lax",
+        secure=True,
+        samesite="none",
     )
     # Secondary explicit expiration header for cross-browser safety
     response.set_cookie(
@@ -51,7 +52,8 @@ def clear_refresh_cookie(response: Response):
         max_age=0,
         path="/",
         httponly=True,
-        samesite="lax",
+        secure=True,
+        samesite="none",
     )
 
 def format_dt(dt) -> str:
@@ -253,12 +255,13 @@ async def google_callback(
         user_agent = request.headers.get("user-agent")
         client_ip = request.client.host if request.client else None
         
+        access_token = create_access_token({"sub": user.id, "email": user.email})
         refresh_token = await auth_service.create_and_store_refresh_token(
             db, user.id, user_agent=user_agent, ip_address=client_ip
         )
 
         frontend_base = get_effective_frontend_url(request)
-        frontend_callback = f"{frontend_base}/auth/callback"
+        frontend_callback = f"{frontend_base}/auth/callback?token={access_token}"
         redirect_response = RedirectResponse(url=frontend_callback)
         set_refresh_cookie(redirect_response, refresh_token)
         return redirect_response

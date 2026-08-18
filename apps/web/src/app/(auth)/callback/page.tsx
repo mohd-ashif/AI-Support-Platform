@@ -1,16 +1,17 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import React, { useEffect, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useDispatch } from "react-redux";
 import { setAuth, setAuthStatus } from "@/store/slices/authSlice";
-import { authService } from "@/services/authService";
+import { authService, setMemoryAccessToken } from "@/services/authService";
 import { workspaceService } from "@/services/workspaceService";
 import { useToast } from "@/components/ui/ToastProvider";
 import { Loader2, Bot } from "lucide-react";
 
-export default function AuthCallbackPage() {
+function CallbackContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const dispatch = useDispatch();
   const toast = useToast();
   const [error, setError] = useState<string | null>(null);
@@ -18,15 +19,27 @@ export default function AuthCallbackPage() {
   useEffect(() => {
     async function bootstrapOAuthSession() {
       try {
-        const refreshData = await authService.refreshToken();
-        if (refreshData?.access_token) {
+        const tokenFromUrl = searchParams.get("token");
+        let activeToken = tokenFromUrl;
+
+        if (tokenFromUrl) {
+          setMemoryAccessToken(tokenFromUrl);
+        } else {
+          const refreshData = await authService.refreshToken().catch(() => null);
+          if (refreshData?.access_token) {
+            activeToken = refreshData.access_token;
+            setMemoryAccessToken(activeToken);
+          }
+        }
+
+        if (activeToken) {
           const userRes = await authService.getCurrentUser();
           const workspacesRes = await workspaceService.getWorkspaces().catch(() => []);
 
           dispatch(
             setAuth({
               user: userRes,
-              accessToken: refreshData.access_token,
+              accessToken: activeToken,
               workspaces: workspacesRes || [],
             })
           );
@@ -52,7 +65,7 @@ export default function AuthCallbackPage() {
     }
 
     bootstrapOAuthSession();
-  }, [dispatch, router, toast]);
+  }, [dispatch, router, searchParams, toast]);
 
   return (
     <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-6 animate-in fade-in duration-300">
@@ -76,5 +89,19 @@ export default function AuthCallbackPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function AuthCallbackPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center p-6">
+          <Loader2 className="h-6 w-6 animate-spin text-[#D4AF37]" />
+        </div>
+      }
+    >
+      <CallbackContent />
+    </Suspense>
   );
 }
