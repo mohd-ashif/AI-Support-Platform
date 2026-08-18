@@ -158,10 +158,19 @@ async def logout(
     clear_refresh_cookie(response)
     return {"message": "Logged out successfully"}
 
+def get_effective_backend_url(request: Request) -> str:
+    if settings.BACKEND_URL and "localhost" not in settings.BACKEND_URL and "127.0.0.1" not in settings.BACKEND_URL:
+        return settings.BACKEND_URL.rstrip("/")
+    base = str(request.base_url).rstrip("/")
+    if "onrender.com" in base:
+        base = base.replace("http://", "https://")
+    return base
+
 @router.get("/google/start")
-async def google_start():
+async def google_start(request: Request):
     state = str(uuid.uuid4())
-    redirect_uri = f"{settings.BACKEND_URL or 'http://localhost:8000'}/auth/google/callback"
+    backend_url = get_effective_backend_url(request)
+    redirect_uri = f"{backend_url}/auth/google/callback"
     url = (
         "https://accounts.google.com/o/oauth2/v2/auth?"
         f"client_id={settings.GOOGLE_CLIENT_ID}&"
@@ -173,8 +182,9 @@ async def google_start():
     return RedirectResponse(url=url)
 
 @router.get("/google/url")
-async def get_google_auth_url():
-    redirect_uri = f"{settings.BACKEND_URL or 'http://localhost:8000'}/auth/google/callback"
+async def get_google_auth_url(request: Request):
+    backend_url = get_effective_backend_url(request)
+    redirect_uri = f"{backend_url}/auth/google/callback"
     url = (
         "https://accounts.google.com/o/oauth2/v2/auth?"
         f"client_id={settings.GOOGLE_CLIENT_ID}&"
@@ -191,7 +201,8 @@ async def google_callback(
     db: AsyncSession = Depends(get_db),
 ):
     try:
-        redirect_uri = f"{settings.BACKEND_URL or 'http://localhost:8000'}/auth/google/callback"
+        backend_url = get_effective_backend_url(request)
+        redirect_uri = f"{backend_url}/auth/google/callback"
         email, name, google_id, avatar_url = None, None, None, None
 
         async with httpx.AsyncClient(timeout=10.0) as client:
