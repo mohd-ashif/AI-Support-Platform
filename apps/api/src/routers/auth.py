@@ -179,10 +179,17 @@ def clean_setting(val: Optional[str]) -> str:
     s = str(val).strip()
     while (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")) or (s.startswith("`") and s.endswith("`")):
         s = s[1:-1].strip()
+    # Strip any control characters, newlines, or invisible spaces
+    s = "".join(c for c in s if c.isprintable() and not c.isspace())
     return s
 
 def clean_url(val: Optional[str]) -> str:
-    return clean_setting(val).rstrip("/")
+    if not val:
+        return ""
+    s = str(val).strip()
+    while (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")) or (s.startswith("`") and s.endswith("`")):
+        s = s[1:-1].strip()
+    return s.rstrip("/")
 
 def get_effective_backend_url(request: Request) -> str:
     base = str(request.base_url).rstrip("/")
@@ -318,6 +325,18 @@ async def google_callback(
                                 "grant_type": "authorization_code",
                             },
                         )
+                        if token_resp.status_code != 200:
+                            # RFC 6749 HTTP Basic Auth fallback
+                            logger.info(f"Form-encoded token exchange status {token_resp.status_code}. Retrying with Basic Auth for r_uri: {r_uri}")
+                            token_resp = await client.post(
+                                "https://oauth2.googleapis.com/token",
+                                auth=(client_id, client_secret),
+                                data={
+                                    "code": code,
+                                    "redirect_uri": r_uri,
+                                    "grant_type": "authorization_code",
+                                },
+                            )
                         if token_resp.status_code == 200:
                             token_data = token_resp.json()
                             userinfo_resp = await client.get(
