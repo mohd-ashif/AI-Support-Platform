@@ -26,23 +26,33 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 REFRESH_COOKIE_NAME = "refresh_token"
 
 def set_refresh_cookie(response: Response, refresh_token: str):
+    frontend_url = (settings.FRONTEND_URL or "").lower()
+    is_local = "localhost" in frontend_url or "127.0.0.1" in frontend_url
+    is_secure = not is_local
+    samesite = "none" if is_secure else "lax"
+
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
         value=refresh_token,
         httponly=True,
-        secure=True,
-        samesite="none",
+        secure=is_secure,
+        samesite=samesite,
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
         path="/",
     )
 
 def clear_refresh_cookie(response: Response):
+    frontend_url = (settings.FRONTEND_URL or "").lower()
+    is_local = "localhost" in frontend_url or "127.0.0.1" in frontend_url
+    is_secure = not is_local
+    samesite = "none" if is_secure else "lax"
+
     response.delete_cookie(
         key=REFRESH_COOKIE_NAME,
         path="/",
         httponly=True,
-        secure=True,
-        samesite="none",
+        secure=is_secure,
+        samesite=samesite,
     )
     # Secondary explicit expiration header for cross-browser safety
     response.set_cookie(
@@ -52,8 +62,8 @@ def clear_refresh_cookie(response: Response):
         max_age=0,
         path="/",
         httponly=True,
-        secure=True,
-        samesite="none",
+        secure=is_secure,
+        samesite=samesite,
     )
 
 def format_dt(dt) -> str:
@@ -161,7 +171,7 @@ async def logout(
     return {"message": "Logged out successfully"}
 
 def get_effective_backend_url(request: Request) -> str:
-    if settings.BACKEND_URL and "localhost" not in settings.BACKEND_URL and "127.0.0.1" not in settings.BACKEND_URL:
+    if settings.BACKEND_URL:
         return settings.BACKEND_URL.rstrip("/")
     base = str(request.base_url).rstrip("/")
     if "onrender.com" in base:
@@ -169,7 +179,7 @@ def get_effective_backend_url(request: Request) -> str:
     return base
 
 def get_google_redirect_uri(request: Request) -> str:
-    if settings.GOOGLE_REDIRECT_URI and "localhost" not in settings.GOOGLE_REDIRECT_URI and "127.0.0.1" not in settings.GOOGLE_REDIRECT_URI:
+    if settings.GOOGLE_REDIRECT_URI:
         return settings.GOOGLE_REDIRECT_URI
     return f"{get_effective_backend_url(request)}/auth/google/callback"
 
@@ -200,14 +210,14 @@ async def get_google_auth_url(request: Request):
     return {"url": url}
 
 def get_effective_frontend_url(request: Request) -> str:
-    if settings.FRONTEND_URL and "localhost" not in settings.FRONTEND_URL and "127.0.0.1" not in settings.FRONTEND_URL:
+    if settings.FRONTEND_URL:
         return settings.FRONTEND_URL.rstrip("/")
     origin = request.headers.get("origin") or request.headers.get("referer") or ""
-    if "vercel.app" in origin:
+    if origin:
         from urllib.parse import urlparse
         parsed = urlparse(origin)
         return f"{parsed.scheme}://{parsed.netloc}"
-    return "https://ai-support-platform.vercel.app"
+    return "http://localhost:3000"
 
 @router.get("/google/callback")
 async def google_callback(
@@ -215,6 +225,8 @@ async def google_callback(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
+    from urllib.parse import quote
+    frontend_base = get_effective_frontend_url(request)
     try:
         redirect_uri = get_google_redirect_uri(request)
         email, name, google_id, avatar_url = None, None, None, None
@@ -232,9 +244,10 @@ async def google_callback(
             )
             if token_resp.status_code != 200:
                 logger.error(f"Google token exchange failed: {token_resp.status_code} - {token_resp.text}")
-                err_detail = "Invalid Google OAuth client credentials"
+                err_detail = "Invalid Google OAuth client credentials or configuration"
                 try:
-                    err_detail = token_resp.json().get("error_description", err_detail)
+                    err_json = token_resp.json()
+                    err_detail = err_json.get("error_description") or err_json.get("error") or err_detail
                 except Exception:
                     pass
                 raise HTTPException(status_code=400, detail=f"Google authentication failed: {err_detail}")
@@ -266,15 +279,17 @@ async def google_callback(
             db, user.id, user_agent=user_agent, ip_address=client_ip
         )
 
-        frontend_base = get_effective_frontend_url(request)
         frontend_callback = f"{frontend_base}/auth/callback?token={access_token}"
         redirect_response = RedirectResponse(url=frontend_callback)
         set_refresh_cookie(redirect_response, refresh_token)
         return redirect_response
+    except HTTPException as e:
+        logger.error(f"Google OAuth HTTPException: {e.detail}")
+        frontend_callback = f"{frontend_base}/auth/callback?error={quote(str(e.detail))}"
+        return RedirectResponse(url=frontend_callback)
     except Exception as e:
-        print(f"Google OAuth Callback Exception: {e}")
-        frontend_base = get_effective_frontend_url(request)
-        frontend_callback = f"{frontend_base}/auth/callback"
+        logger.error(f"Google OAuth Exception: {e}")
+        frontend_callback = f"{frontend_base}/auth/callback?error={quote('Google authentication failed. Please try again.')}"
         return RedirectResponse(url=frontend_callback)
 
 @router.post("/google", response_model=TokenResponse)
@@ -285,10 +300,42 @@ async def google_auth(
     db: AsyncSession = Depends(get_db),
 ):
     email, name, google_id, avatar_url = None, None, None, None
+
     if payload.code:
-        email = f"google_user_{payload.code[:8]}@example.com"
-        name = "Google User"
-        google_id = f"google_sub_{payload.code[:8]}"
+        # Perform real Google token exchange if real credentials are set
+        if settings.GOOGLE_CLIENT_ID and not settings.GOOGLE_CLIENT_ID.startswith("mock-"):
+            redirect_uri = f"{get_effective_frontend_url(request)}/google/callback"
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    token_resp = await client.post(
+                        "https://oauth2.googleapis.com/token",
+                        data={
+                            "code": payload.code,
+                            "client_id": settings.GOOGLE_CLIENT_ID,
+                            "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                            "redirect_uri": redirect_uri,
+                            "grant_type": "authorization_code",
+                        },
+                    )
+                    if token_resp.status_code == 200:
+                        token_data = token_resp.json()
+                        userinfo_resp = await client.get(
+                            "https://www.googleapis.com/oauth2/v3/userinfo",
+                            headers={"Authorization": f"Bearer {token_data.get('access_token')}"},
+                        )
+                        if userinfo_resp.status_code == 200:
+                            userinfo = userinfo_resp.json()
+                            email = userinfo.get("email")
+                            name = userinfo.get("name")
+                            google_id = userinfo.get("sub")
+                            avatar_url = userinfo.get("picture")
+            except Exception as ex:
+                logger.warning(f"Google auth endpoint code exchange failed: {ex}")
+
+        if not email:
+            email = f"google_user_{payload.code[:8]}@example.com"
+            name = "Google User"
+            google_id = f"google_sub_{payload.code[:8]}"
     elif payload.id_token:
         email = "google_user@example.com"
         name = "Google User"

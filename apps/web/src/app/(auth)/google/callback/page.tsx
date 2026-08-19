@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useDispatch } from "react-redux";
 import { setAuth } from "@/store/slices/authSlice";
 import { authService } from "@/services/authService";
+import { setMemoryAccessToken } from "@/lib/api";
 import { useToast } from "@/components/ui/ToastProvider";
 import { Loader2, AlertCircle } from "lucide-react";
 
@@ -16,15 +17,27 @@ export default function GoogleCallbackPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const errorParam = searchParams.get("error");
+    if (errorParam) {
+      setError(errorParam);
+      toast.error(errorParam);
+      setTimeout(() => router.push("/login"), 3000);
+      return;
+    }
+
     const code = searchParams.get("code");
     if (!code) {
       setError("No authorization code provided by Google.");
+      setTimeout(() => router.push("/login"), 2500);
       return;
     }
 
     async function processGoogleAuth() {
       try {
         const response = await authService.googleAuth(code!);
+        if (response.access_token) {
+          setMemoryAccessToken(response.access_token);
+        }
 
         dispatch(
           setAuth({
@@ -45,6 +58,7 @@ export default function GoogleCallbackPage() {
         const msg = err.message || "Failed to complete Google authentication.";
         setError(msg);
         toast.error(msg);
+        setTimeout(() => router.push("/login"), 3000);
       }
     }
 

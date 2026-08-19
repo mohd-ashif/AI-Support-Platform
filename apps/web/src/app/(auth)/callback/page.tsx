@@ -20,27 +20,26 @@ function CallbackContent() {
   useEffect(() => {
     async function bootstrapOAuthSession() {
       try {
+        const errorFromUrl = searchParams.get("error");
+        if (errorFromUrl) {
+          setError(errorFromUrl);
+          toast.error(errorFromUrl);
+          dispatch(setAuthStatus("unauthenticated"));
+          setTimeout(() => router.push("/login"), 3500);
+          return;
+        }
+
         const tokenFromUrl = searchParams.get("token");
-        let activeToken = tokenFromUrl;
 
         if (tokenFromUrl) {
           setMemoryAccessToken(tokenFromUrl);
-        } else {
-          const refreshData = await authService.refreshToken().catch(() => null);
-          if (refreshData?.access_token) {
-            activeToken = refreshData.access_token;
-            setMemoryAccessToken(activeToken);
-          }
-        }
-
-        if (activeToken) {
           const userRes = await authService.getCurrentUser();
           const workspacesRes = await workspaceService.getWorkspaces().catch(() => []);
 
           dispatch(
             setAuth({
               user: userRes,
-              accessToken: activeToken,
+              accessToken: tokenFromUrl,
               workspaces: workspacesRes || [],
             })
           );
@@ -53,15 +52,16 @@ function CallbackContent() {
             router.push("/onboarding");
           }
         } else {
+          setError("Google sign-in did not return a valid session token. Please try again.");
           dispatch(setAuthStatus("unauthenticated"));
-          router.push("/login");
+          setTimeout(() => router.push("/login"), 3000);
         }
       } catch (err: any) {
         const msg = err.message || "Failed to complete Google sign in.";
         setError(msg);
         toast.error(msg);
         dispatch(setAuthStatus("unauthenticated"));
-        setTimeout(() => router.push("/login"), 2500);
+        setTimeout(() => router.push("/login"), 3000);
       }
     }
 
