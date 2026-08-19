@@ -301,10 +301,15 @@ async def google_callback(
     from urllib.parse import quote
     frontend_base = get_effective_frontend_url(request)
 
+    if not code:
+        code = request.query_params.get("code")
+    if not error:
+        error = request.query_params.get("error")
+
     if error or not code:
-        err_msg = error or "Authorization code missing from Google redirect."
-        logger.warning(f"Google OAuth callback error: {err_msg}")
-        frontend_callback = f"{frontend_base}/auth/callback?error={quote(err_msg)}"
+        err_detail = request.query_params.get("error_description") or error or "Authorization code missing from Google redirect."
+        logger.warning(f"Google OAuth callback error: query_params={dict(request.query_params)} -> {err_detail}")
+        frontend_callback = f"{frontend_base}/auth/callback?error={quote(err_detail)}"
         return RedirectResponse(url=frontend_callback)
 
     try:
@@ -332,6 +337,11 @@ async def google_callback(
                 if email:
                     break
                 try:
+                    logger.info(
+                        f"[OAUTH-DEBUG] Exchanging code: client_id={client_id[:15]}... "
+                        f"secret_len={len(client_secret)} secret_prefix={client_secret[:8]}... secret_suffix=...{client_secret[-5:] if len(client_secret)>5 else ''} "
+                        f"r_uri={r_uri}"
+                    )
                     async with httpx.AsyncClient(timeout=10.0) as client:
                         token_resp = await client.post(
                             "https://oauth2.googleapis.com/token",
