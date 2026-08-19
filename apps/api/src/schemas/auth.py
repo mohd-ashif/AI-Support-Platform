@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Any
 from pydantic import BaseModel, EmailStr, Field, field_validator
 from apps.api.src.utils.security import validate_password_rules
 
@@ -46,7 +46,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
-    workspaces: List[Any] = []
+    workspaces: List[Any] = Field(default_factory=list)
 
 class RefreshResponse(BaseModel):
     access_token: str
