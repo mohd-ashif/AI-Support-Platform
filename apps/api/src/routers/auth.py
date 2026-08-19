@@ -1,3 +1,4 @@
+import logging
 import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Cookie, Query
@@ -20,6 +21,8 @@ from apps.api.src.models.core import User
 from apps.api.src.utils.security import create_access_token
 from apps.api.src.utils.rate_limiter import rate_limit_register, rate_limit_login
 from apps.api.src.config.settings import settings
+
+logger = logging.getLogger("auth_router")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
