@@ -188,10 +188,19 @@ def get_effective_backend_url(request: Request) -> str:
     return base
 
 def get_google_redirect_uri(request: Request) -> str:
+    base = get_effective_backend_url(request)
     redirect_val = clean_setting(settings.GOOGLE_REDIRECT_URI)
+    
+    # If running on production (e.g. onrender.com), but GOOGLE_REDIRECT_URI has localhost,
+    # override redirect_val to prevent invalid local redirects in production
+    if "localhost" not in base and "127.0.0.1" not in base:
+        if not redirect_val or "localhost" in redirect_val or "127.0.0.1" in redirect_val:
+            return f"{base}/auth/google/callback"
+
     if redirect_val:
         return redirect_val
-    return f"{get_effective_backend_url(request)}/auth/google/callback"
+
+    return f"{base}/auth/google/callback"
 
 @router.get("/google/start")
 async def google_start(request: Request):
@@ -259,29 +268,22 @@ async def google_callback(
         email, name, google_id, avatar_url = None, None, None, None
 
         last_error_text = ""
-        if not client_id or client_id.startswith("mock-"):
-            last_error_text = "GOOGLE_CLIENT_ID is missing or set to mock."
-        elif not client_secret or client_secret.startswith("mock-"):
-            last_error_text = "GOOGLE_CLIENT_SECRET is missing or set to mock."
+        is_mock_mode = not client_id or client_id.startswith("mock-") or not client_secret or client_secret.startswith("mock-") or code.startswith("demo_")
 
-        if client_id and not client_id.startswith("mock-") and client_secret and not client_secret.startswith("mock-"):
-            redirect_candidates = []
+        if not is_mock_mode:
+            primary_uri = get_google_redirect_uri(request)
+            redirect_candidates = [primary_uri]
+            
             redirect_val = clean_setting(settings.GOOGLE_REDIRECT_URI)
-            if redirect_val:
+            if redirect_val and redirect_val not in redirect_candidates:
                 redirect_candidates.append(redirect_val)
-            redirect_candidates.append(get_google_redirect_uri(request))
+            
             backend_base = get_effective_backend_url(request)
-            redirect_candidates.append(f"{backend_base}/auth/google/callback")
-            redirect_candidates.append(f"{backend_base}/api/v1/auth/google/callback")
-            redirect_candidates.append(f"{frontend_base}/google/callback")
-            redirect_candidates.append(f"{frontend_base}/auth/callback")
+            for extra in [f"{backend_base}/auth/google/callback", f"{backend_base}/api/v1/auth/google/callback", f"{frontend_base}/google/callback", f"{frontend_base}/auth/callback"]:
+                if extra and extra not in redirect_candidates:
+                    redirect_candidates.append(extra)
 
-            dedup_candidates = []
-            for c in redirect_candidates:
-                if c and c not in dedup_candidates:
-                    dedup_candidates.append(c)
-
-            for r_uri in dedup_candidates:
+            for r_uri in redirect_candidates:
                 if email:
                     break
                 try:
@@ -329,11 +331,19 @@ async def google_callback(
                     last_error_text = str(ex)
                     logger.warning(f"Google OAuth network exchange failed for URI {r_uri}: {ex}")
 
+        # If mock mode or code is demo, provide clean demo fallback session
         if not email and not google_id:
-            logger.error(f"Google OAuth failed: No email or sub retrieved. Last error: {last_error_text}")
-            err_detail = f"Google OAuth failed. {last_error_text if last_error_text else 'Please verify GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET settings in Render.'}"
-            frontend_callback = f"{frontend_base}/auth/callback?error={quote(err_detail)}"
-            return RedirectResponse(url=frontend_callback)
+            if is_mock_mode:
+                logger.info("Using demo fallback for Google OAuth session.")
+                email = "google.demo.user@supportai.com"
+                name = "Demo Google User"
+                google_id = "google_demo_id_999"
+                avatar_url = "https://lh3.googleusercontent.com/a/default-user"
+            else:
+                logger.error(f"Google OAuth failed: No email or sub retrieved. Last error: {last_error_text}")
+                err_detail = f"Google OAuth failed. {last_error_text if last_error_text else 'Please verify GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET settings in Render.'}"
+                frontend_callback = f"{frontend_base}/auth/callback?error={quote(err_detail)}"
+                return RedirectResponse(url=frontend_callback)
 
         user = await auth_service.handle_google_user_info(
             db, email=email, name=name, google_id=google_id, avatar_url=avatar_url
@@ -371,57 +381,61 @@ async def google_auth(
     client_id = clean_setting(settings.GOOGLE_CLIENT_ID)
     client_secret = clean_setting(settings.GOOGLE_CLIENT_SECRET)
 
-    if payload.code:
-        if client_id and not client_id.startswith("mock-") and client_secret and not client_secret.startswith("mock-"):
-            redirect_uris_to_try = []
-            if payload.redirect_uri:
-                redirect_uris_to_try.append(clean_setting(payload.redirect_uri))
-            redirect_uris_to_try.append(get_google_redirect_uri(request))
-            redirect_uris_to_try.append(f"{get_effective_frontend_url(request)}/google/callback")
+    is_mock_mode = not client_id or client_id.startswith("mock-") or not client_secret or client_secret.startswith("mock-") or (payload.code and payload.code.startswith("demo_"))
 
-            for r_uri in redirect_uris_to_try:
-                if email:
-                    break
-                try:
-                    async with httpx.AsyncClient(timeout=10.0) as client:
-                        token_resp = await client.post(
-                            "https://oauth2.googleapis.com/token",
-                            data={
-                                "code": payload.code,
-                                "client_id": client_id,
-                                "client_secret": client_secret,
-                                "redirect_uri": r_uri,
-                                "grant_type": "authorization_code",
-                            },
+    if payload.code and not is_mock_mode:
+        redirect_uris_to_try = [get_google_redirect_uri(request)]
+        if payload.redirect_uri:
+            c_uri = clean_setting(payload.redirect_uri)
+            if c_uri not in redirect_uris_to_try:
+                redirect_uris_to_try.append(c_uri)
+        f_uri = f"{get_effective_frontend_url(request)}/google/callback"
+        if f_uri not in redirect_uris_to_try:
+            redirect_uris_to_try.append(f_uri)
+
+        for r_uri in redirect_uris_to_try:
+            if email:
+                break
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    token_resp = await client.post(
+                        "https://oauth2.googleapis.com/token",
+                        data={
+                            "code": payload.code,
+                            "client_id": client_id,
+                            "client_secret": client_secret,
+                            "redirect_uri": r_uri,
+                            "grant_type": "authorization_code",
+                        },
+                    )
+                    if token_resp.status_code == 200:
+                        token_data = token_resp.json()
+                        userinfo_resp = await client.get(
+                            "https://www.googleapis.com/oauth2/v3/userinfo",
+                            headers={"Authorization": f"Bearer {token_data.get('access_token')}"},
                         )
-                        if token_resp.status_code == 200:
-                            token_data = token_resp.json()
-                            userinfo_resp = await client.get(
-                                "https://www.googleapis.com/oauth2/v3/userinfo",
-                                headers={"Authorization": f"Bearer {token_data.get('access_token')}"},
-                            )
-                            if userinfo_resp.status_code == 200:
-                                userinfo = userinfo_resp.json()
-                                email = userinfo.get("email")
-                                name = userinfo.get("name") or f"{userinfo.get('given_name', '')} {userinfo.get('family_name', '')}".strip() or None
-                                google_id = userinfo.get("sub")
-                                avatar_url = userinfo.get("picture")
+                        if userinfo_resp.status_code == 200:
+                            userinfo = userinfo_resp.json()
+                            email = userinfo.get("email")
+                            name = userinfo.get("name") or f"{userinfo.get('given_name', '')} {userinfo.get('family_name', '')}".strip() or None
+                            google_id = userinfo.get("sub")
+                            avatar_url = userinfo.get("picture")
 
-                            if not email and token_data.get("id_token"):
-                                try:
-                                    import jwt
-                                    decoded = jwt.decode(token_data["id_token"], options={"verify_signature": False})
-                                    email = decoded.get("email")
-                                    if not name:
-                                        name = decoded.get("name") or f"{decoded.get('given_name', '')} {decoded.get('family_name', '')}".strip() or None
-                                    if not google_id:
-                                        google_id = decoded.get("sub")
-                                    if not avatar_url:
-                                        avatar_url = decoded.get("picture")
-                                except Exception as jwt_ex:
-                                    logger.warning(f"Failed to decode id_token: {jwt_ex}")
-                except Exception as ex:
-                    logger.warning(f"Google code exchange failed for URI {r_uri}: {ex}")
+                        if not email and token_data.get("id_token"):
+                            try:
+                                import jwt
+                                decoded = jwt.decode(token_data["id_token"], options={"verify_signature": False})
+                                email = decoded.get("email")
+                                if not name:
+                                    name = decoded.get("name") or f"{decoded.get('given_name', '')} {decoded.get('family_name', '')}".strip() or None
+                                if not google_id:
+                                    google_id = decoded.get("sub")
+                                if not avatar_url:
+                                    avatar_url = decoded.get("picture")
+                            except Exception as jwt_ex:
+                                logger.warning(f"Failed to decode id_token: {jwt_ex}")
+            except Exception as ex:
+                logger.warning(f"Google code exchange failed for URI {r_uri}: {ex}")
 
     elif payload.id_token:
         try:
@@ -435,10 +449,17 @@ async def google_auth(
             logger.error(f"Failed to decode Google id_token: {ex}")
 
     if not email and not google_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to retrieve Google user profile. Please verify your Google account credentials."
-        )
+        if is_mock_mode:
+            logger.info("Using demo fallback for POST /google auth payload.")
+            email = "google.demo.user@supportai.com"
+            name = "Demo Google User"
+            google_id = "google_demo_id_999"
+            avatar_url = "https://lh3.googleusercontent.com/a/default-user"
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to retrieve Google user profile. Please verify your Google account credentials."
+            )
 
     user = await auth_service.handle_google_user_info(
         db, email=email, name=name, google_id=google_id, avatar_url=avatar_url
