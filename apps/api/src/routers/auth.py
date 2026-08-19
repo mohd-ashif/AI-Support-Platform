@@ -176,7 +176,10 @@ async def logout(
 def clean_setting(val: Optional[str]) -> str:
     if not val:
         return ""
-    return val.strip().strip('"').strip("'")
+    s = str(val).strip()
+    while (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")) or (s.startswith("`") and s.endswith("`")):
+        s = s[1:-1].strip()
+    return s
 
 def clean_url(val: Optional[str]) -> str:
     return clean_setting(val).rstrip("/")
@@ -205,10 +208,24 @@ def get_google_redirect_uri(request: Request) -> str:
 
     return f"{base}/auth/google/callback"
 
+def get_google_client_id() -> str:
+    import os
+    env_val = os.environ.get("GOOGLE_CLIENT_ID")
+    if env_val and env_val.strip():
+        return clean_setting(env_val)
+    return clean_setting(settings.GOOGLE_CLIENT_ID)
+
+def get_google_client_secret() -> str:
+    import os
+    env_val = os.environ.get("GOOGLE_CLIENT_SECRET")
+    if env_val and env_val.strip():
+        return clean_setting(env_val)
+    return clean_setting(settings.GOOGLE_CLIENT_SECRET)
+
 @router.get("/google/start")
 async def google_start(request: Request):
     state = str(uuid.uuid4())
-    client_id = clean_setting(settings.GOOGLE_CLIENT_ID)
+    client_id = get_google_client_id()
     redirect_uri = get_google_redirect_uri(request)
     url = (
         "https://accounts.google.com/o/oauth2/v2/auth?"
@@ -222,7 +239,7 @@ async def google_start(request: Request):
 
 @router.get("/google/url")
 async def get_google_auth_url(request: Request):
-    client_id = clean_setting(settings.GOOGLE_CLIENT_ID)
+    client_id = get_google_client_id()
     redirect_uri = get_google_redirect_uri(request)
     url = (
         "https://accounts.google.com/o/oauth2/v2/auth?"
@@ -266,8 +283,8 @@ async def google_callback(
         return RedirectResponse(url=frontend_callback)
 
     try:
-        client_id = clean_setting(settings.GOOGLE_CLIENT_ID)
-        client_secret = clean_setting(settings.GOOGLE_CLIENT_SECRET)
+        client_id = get_google_client_id()
+        client_secret = get_google_client_secret()
         email, name, google_id, avatar_url = None, None, None, None
 
         last_error_text = ""
@@ -381,8 +398,8 @@ async def google_auth(
     db: AsyncSession = Depends(get_db),
 ):
     email, name, google_id, avatar_url = None, None, None, None
-    client_id = clean_setting(settings.GOOGLE_CLIENT_ID)
-    client_secret = clean_setting(settings.GOOGLE_CLIENT_SECRET)
+    client_id = get_google_client_id()
+    client_secret = get_google_client_secret()
 
     is_mock_mode = not client_id or client_id.startswith("mock-") or not client_secret or client_secret.startswith("mock-") or (payload.code and payload.code.startswith("demo_"))
 
