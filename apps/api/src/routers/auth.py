@@ -170,27 +170,35 @@ async def logout(
     clear_refresh_cookie(response)
     return {"message": "Logged out successfully"}
 
+def clean_setting(val: Optional[str]) -> str:
+    if not val:
+        return ""
+    return val.strip().strip('"').strip("'").rstrip("/")
+
 def get_effective_backend_url(request: Request) -> str:
     base = str(request.base_url).rstrip("/")
     if "onrender.com" in base:
         return base.replace("http://", "https://")
-    if settings.BACKEND_URL and "localhost" not in base and "127.0.0.1" not in base:
-        return settings.BACKEND_URL.rstrip("/")
+    backend_val = clean_setting(settings.BACKEND_URL)
+    if backend_val and "localhost" not in base and "127.0.0.1" not in base:
+        return backend_val
     return base
 
 def get_google_redirect_uri(request: Request) -> str:
     base = str(request.base_url).rstrip("/")
-    if settings.GOOGLE_REDIRECT_URI and ("localhost" in base or "127.0.0.1" in base):
-        return settings.GOOGLE_REDIRECT_URI
+    redirect_val = clean_setting(settings.GOOGLE_REDIRECT_URI)
+    if redirect_val and ("localhost" in base or "127.0.0.1" in base):
+        return redirect_val
     return f"{get_effective_backend_url(request)}/auth/google/callback"
 
 @router.get("/google/start")
 async def google_start(request: Request):
     state = str(uuid.uuid4())
+    client_id = clean_setting(settings.GOOGLE_CLIENT_ID)
     redirect_uri = get_google_redirect_uri(request)
     url = (
         "https://accounts.google.com/o/oauth2/v2/auth?"
-        f"client_id={settings.GOOGLE_CLIENT_ID}&"
+        f"client_id={client_id}&"
         f"redirect_uri={redirect_uri}&"
         "response_type=code&"
         "scope=openid%20email%20profile&"
@@ -200,10 +208,11 @@ async def google_start(request: Request):
 
 @router.get("/google/url")
 async def get_google_auth_url(request: Request):
+    client_id = clean_setting(settings.GOOGLE_CLIENT_ID)
     redirect_uri = get_google_redirect_uri(request)
     url = (
         "https://accounts.google.com/o/oauth2/v2/auth?"
-        f"client_id={settings.GOOGLE_CLIENT_ID}&"
+        f"client_id={client_id}&"
         f"redirect_uri={redirect_uri}&"
         "response_type=code&"
         "scope=openid%20email%20profile"
@@ -213,16 +222,17 @@ async def get_google_auth_url(request: Request):
 def get_effective_frontend_url(request: Request) -> str:
     base = str(request.base_url).rstrip("/")
     origin = request.headers.get("origin") or request.headers.get("referer") or ""
+    frontend_val = clean_setting(settings.FRONTEND_URL)
     if "onrender.com" in base or "vercel.app" in origin:
-        if settings.FRONTEND_URL and "localhost" not in settings.FRONTEND_URL:
-            return settings.FRONTEND_URL.rstrip("/")
+        if frontend_val and "localhost" not in frontend_val:
+            return frontend_val
         if origin:
             from urllib.parse import urlparse
             parsed = urlparse(origin)
             return f"{parsed.scheme}://{parsed.netloc}"
         return "https://ai-support-platform.vercel.app"
-    if settings.FRONTEND_URL:
-        return settings.FRONTEND_URL.rstrip("/")
+    if frontend_val:
+        return frontend_val
     return "http://localhost:3000"
 
 @router.get("/google/callback")
@@ -243,6 +253,8 @@ async def google_callback(
 
     try:
         redirect_uri = get_google_redirect_uri(request)
+        client_id = clean_setting(settings.GOOGLE_CLIENT_ID)
+        client_secret = clean_setting(settings.GOOGLE_CLIENT_SECRET)
         email, name, google_id, avatar_url = None, None, None, None
 
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -250,8 +262,8 @@ async def google_callback(
                 "https://oauth2.googleapis.com/token",
                 data={
                     "code": code,
-                    "client_id": settings.GOOGLE_CLIENT_ID,
-                    "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
                     "redirect_uri": redirect_uri,
                     "grant_type": "authorization_code",
                 },
