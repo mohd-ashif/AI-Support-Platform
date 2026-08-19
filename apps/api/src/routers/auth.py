@@ -15,7 +15,7 @@ from apps.api.src.schemas.auth import (
     RefreshResponse,
     GoogleAuthRequest,
 )
-from apps.api.src.services import auth_service
+from apps.api.src.services import auth_service, workspace_service
 from apps.api.src.dependencies.auth import get_current_user
 from apps.api.src.models.core import User
 from apps.api.src.utils.security import create_access_token
@@ -95,7 +95,7 @@ async def register(
     )
     set_refresh_cookie(response, refresh_token)
 
-    workspaces = await auth_service.get_user_workspaces(db, user.id)
+    workspaces = await workspace_service.get_user_workspaces(db, user.id)
     user_resp = UserResponse(
         id=user.id,
         email=user.email,
@@ -123,7 +123,7 @@ async def login(
     )
     set_refresh_cookie(response, refresh_token)
 
-    workspaces = await auth_service.get_user_workspaces(db, user.id)
+    workspaces = await workspace_service.get_user_workspaces(db, user.id)
     user_resp = UserResponse(
         id=user.id,
         email=user.email,
@@ -188,9 +188,8 @@ def get_effective_backend_url(request: Request) -> str:
     return base
 
 def get_google_redirect_uri(request: Request) -> str:
-    base = str(request.base_url).rstrip("/")
     redirect_val = clean_setting(settings.GOOGLE_REDIRECT_URI)
-    if redirect_val and ("localhost" in base or "127.0.0.1" in base):
+    if redirect_val:
         return redirect_val
     return f"{get_effective_backend_url(request)}/auth/google/callback"
 
@@ -255,60 +254,79 @@ async def google_callback(
         return RedirectResponse(url=frontend_callback)
 
     try:
-        redirect_uri = get_google_redirect_uri(request)
         client_id = clean_setting(settings.GOOGLE_CLIENT_ID)
         client_secret = clean_setting(settings.GOOGLE_CLIENT_SECRET)
         email, name, google_id, avatar_url = None, None, None, None
 
         if client_id and not client_id.startswith("mock-") and client_secret and not client_secret.startswith("mock-"):
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    token_resp = await client.post(
-                        "https://oauth2.googleapis.com/token",
-                        data={
-                            "code": code,
-                            "client_id": client_id,
-                            "client_secret": client_secret,
-                            "redirect_uri": redirect_uri,
-                            "grant_type": "authorization_code",
-                        },
-                    )
-                    if token_resp.status_code == 200:
-                        token_data = token_resp.json()
-                        userinfo_resp = await client.get(
-                            "https://www.googleapis.com/oauth2/v3/userinfo",
-                            headers={"Authorization": f"Bearer {token_data.get('access_token')}"},
-                        )
-                        if userinfo_resp.status_code == 200:
-                            userinfo = userinfo_resp.json()
-                            email = userinfo.get("email")
-                            name = userinfo.get("name") or f"{userinfo.get('given_name', '')} {userinfo.get('family_name', '')}".strip() or None
-                            google_id = userinfo.get("sub")
-                            avatar_url = userinfo.get("picture")
-                        else:
-                            logger.error(f"Google userinfo request failed: {userinfo_resp.status_code} - {userinfo_resp.text}")
+            redirect_candidates = []
+            redirect_val = clean_setting(settings.GOOGLE_REDIRECT_URI)
+            if redirect_val:
+                redirect_candidates.append(redirect_val)
+            redirect_candidates.append(get_google_redirect_uri(request))
+            backend_base = get_effective_backend_url(request)
+            redirect_candidates.append(f"{backend_base}/auth/google/callback")
+            redirect_candidates.append(f"{backend_base}/api/v1/auth/google/callback")
+            redirect_candidates.append(f"{frontend_base}/google/callback")
+            redirect_candidates.append(f"{frontend_base}/auth/callback")
 
-                        if not email and token_data.get("id_token"):
-                            try:
-                                import jwt
-                                decoded = jwt.decode(token_data["id_token"], options={"verify_signature": False})
-                                email = decoded.get("email")
-                                if not name:
-                                    name = decoded.get("name") or f"{decoded.get('given_name', '')} {decoded.get('family_name', '')}".strip() or None
-                                if not google_id:
-                                    google_id = decoded.get("sub")
-                                if not avatar_url:
-                                    avatar_url = decoded.get("picture")
-                            except Exception as jwt_ex:
-                                logger.warning(f"Failed to decode id_token: {jwt_ex}")
-                    else:
-                        logger.error(f"Google token exchange failed: {token_resp.status_code} - {token_resp.text}")
-            except Exception as ex:
-                logger.warning(f"Google OAuth network exchange failed: {ex}")
+            dedup_candidates = []
+            for c in redirect_candidates:
+                if c and c not in dedup_candidates:
+                    dedup_candidates.append(c)
+
+            last_error_text = ""
+            for r_uri in dedup_candidates:
+                if email:
+                    break
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        token_resp = await client.post(
+                            "https://oauth2.googleapis.com/token",
+                            data={
+                                "code": code,
+                                "client_id": client_id,
+                                "client_secret": client_secret,
+                                "redirect_uri": r_uri,
+                                "grant_type": "authorization_code",
+                            },
+                        )
+                        if token_resp.status_code == 200:
+                            token_data = token_resp.json()
+                            userinfo_resp = await client.get(
+                                "https://www.googleapis.com/oauth2/v3/userinfo",
+                                headers={"Authorization": f"Bearer {token_data.get('access_token')}"},
+                            )
+                            if userinfo_resp.status_code == 200:
+                                userinfo = userinfo_resp.json()
+                                email = userinfo.get("email")
+                                name = userinfo.get("name") or f"{userinfo.get('given_name', '')} {userinfo.get('family_name', '')}".strip() or None
+                                google_id = userinfo.get("sub")
+                                avatar_url = userinfo.get("picture")
+
+                            if not email and token_data.get("id_token"):
+                                try:
+                                    import jwt
+                                    decoded = jwt.decode(token_data["id_token"], options={"verify_signature": False})
+                                    email = decoded.get("email")
+                                    if not name:
+                                        name = decoded.get("name") or f"{decoded.get('given_name', '')} {decoded.get('family_name', '')}".strip() or None
+                                    if not google_id:
+                                        google_id = decoded.get("sub")
+                                    if not avatar_url:
+                                        avatar_url = decoded.get("picture")
+                                except Exception as jwt_ex:
+                                    logger.warning(f"Failed to decode id_token: {jwt_ex}")
+                        else:
+                            last_error_text = token_resp.text
+                            logger.warning(f"Google token exchange failed for URI {r_uri}: {token_resp.status_code} - {token_resp.text}")
+                except Exception as ex:
+                    logger.warning(f"Google OAuth network exchange failed for URI {r_uri}: {ex}")
 
         if not email and not google_id:
             logger.error("Google OAuth failed: No email or sub retrieved from Google.")
-            frontend_callback = f"{frontend_base}/auth/callback?error={quote('Failed to obtain account details from Google OAuth.')}"
+            err_detail = "Failed to obtain account details from Google OAuth. Please verify GOOGLE_CLIENT_ID/SECRET and GOOGLE_REDIRECT_URI settings."
+            frontend_callback = f"{frontend_base}/auth/callback?error={quote(err_detail)}"
             return RedirectResponse(url=frontend_callback)
 
         user = await auth_service.handle_google_user_info(
@@ -430,7 +448,7 @@ async def google_auth(
     )
     set_refresh_cookie(response, refresh_token)
 
-    workspaces = await auth_service.get_user_workspaces(db, user.id)
+    workspaces = await workspace_service.get_user_workspaces(db, user.id)
     user_resp = UserResponse(
         id=user.id,
         email=user.email,

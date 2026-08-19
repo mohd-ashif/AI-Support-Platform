@@ -26,9 +26,6 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     setMounted(true);
-    if (getMemoryAccessToken()) {
-      setInitializing(false);
-    }
     const fallbackTimer = setTimeout(() => {
       setInitializing(false);
     }, 10000);
@@ -46,7 +43,6 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       const isExplicitLogout = typeof window !== "undefined" && sessionStorage.getItem("explicit_logout") === "true";
       const token = getMemoryAccessToken();
 
-      // If user explicitly logged out or has no memory token, abort session restoration
       if (isExplicitLogout || !token) {
         setInitializing(false);
         return;
@@ -66,7 +62,6 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
             );
           }
         } catch (e) {
-          // Token invalid or session expired
           clearAllAuthStorage();
           dispatch(logoutUser());
         }
@@ -84,22 +79,20 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     const isDashboardRoute = pathname.startsWith("/dashboard");
     const isOnboardingRoute = pathname.startsWith("/onboarding");
 
-    // 1. Unauthenticated users on protected routes -> Instant redirect
+    // 1. Unauthenticated users on protected routes
     if ((isDashboardRoute || isOnboardingRoute) && !isAuthenticated && !getMemoryAccessToken()) {
-      if (typeof window !== "undefined") {
+      if (typeof window !== "undefined" && window.location.pathname !== "/login") {
         window.location.replace("/login");
-      } else {
-        router.replace("/login");
       }
       return;
     }
 
+    // 2. Authenticated user routing based on backend database state
     if (isAuthenticated) {
       const hasWorkspaces = Array.isArray(workspaces) && workspaces.length > 0;
 
-      // 2. Authenticated users with 0 workspaces
       if (!hasWorkspaces || !activeWs) {
-        if (!isOnboardingRoute) {
+        if (!isOnboardingRoute && pathname !== "/onboarding/business") {
           router.replace("/onboarding/business");
         }
         return;
@@ -108,18 +101,20 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       const status = activeWs.status;
       const role = activeWs.role;
 
-      // Non-owner team members (agents, admins) bypass owner onboarding flow
+      // Active/trialing returning users or non-owner team members -> Dashboard
       if (role === "agent" || role === "admin" || status === "active" || status === "trialing" || status === "past_due") {
-        if (isAuthRoute || (isOnboardingRoute && role !== "owner")) {
+        if (isAuthRoute || isOnboardingRoute) {
           router.replace("/dashboard");
         }
         return;
       }
 
-      // 4. Owner Onboarding Status Handling
+      // Workspace in onboarding state -> Subscription page
       if (status === "onboarding") {
-        if (isDashboardRoute) {
-          router.replace("/onboarding/subscription");
+        if (isDashboardRoute || isAuthRoute || pathname === "/onboarding" || pathname === "/onboarding/business") {
+          if (pathname !== "/onboarding/subscription") {
+            router.replace("/onboarding/subscription");
+          }
         }
       } else if (status === "canceled") {
         if (pathname !== "/onboarding/subscription") {
@@ -136,9 +131,6 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const isDashboardRoute = pathname.startsWith("/dashboard");
   const isOnboardingRoute = pathname.startsWith("/onboarding");
   if ((isDashboardRoute || isOnboardingRoute) && !isAuthenticated && !getMemoryAccessToken()) {
-    if (typeof window !== "undefined" && window.location.pathname !== "/login") {
-      window.location.replace("/login");
-    }
     return <NeuralNetworkLoader size="fullscreen" text="Redirecting to login..." />;
   }
 

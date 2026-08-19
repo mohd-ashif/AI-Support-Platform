@@ -49,10 +49,13 @@ export default function GoogleCallbackPage() {
 
         toast.success("Google Authentication successful!");
 
-        if (response.workspaces && response.workspaces.length > 0) {
+        const primaryWs = (response.workspaces && response.workspaces.length > 0) ? response.workspaces[0] : null;
+        if (primaryWs && (primaryWs.status === "active" || primaryWs.status === "trialing" || primaryWs.role === "agent" || primaryWs.role === "admin")) {
           router.push("/dashboard");
+        } else if (primaryWs && primaryWs.status === "onboarding") {
+          router.push("/onboarding/subscription");
         } else {
-          router.push("/onboarding");
+          router.push("/onboarding/business");
         }
       } catch (err: any) {
         const msg = err.message || "Failed to complete Google authentication.";

@@ -71,10 +71,15 @@ export default function SignupPage() {
       const redirectUrl = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("redirect") : null;
       if (redirectUrl) {
         router.push(redirectUrl);
-      } else if (response.workspaces && response.workspaces.length > 0) {
-        router.push("/dashboard");
       } else {
-        router.push("/onboarding");
+        const primaryWs = (response.workspaces && response.workspaces.length > 0) ? response.workspaces[0] : null;
+        if (primaryWs && (primaryWs.status === "active" || primaryWs.status === "trialing" || primaryWs.role === "agent" || primaryWs.role === "admin")) {
+          router.push("/dashboard");
+        } else if (primaryWs && primaryWs.status === "onboarding") {
+          router.push("/onboarding/subscription");
+        } else {
+          router.push("/onboarding/business");
+        }
       }
     } catch (err: any) {
       const msg = err.message || "Failed to create account. Please try again.";

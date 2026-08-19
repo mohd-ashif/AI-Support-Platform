@@ -46,10 +46,13 @@ function CallbackContent() {
 
           toast.success("Signed in successfully!");
 
-          if (workspacesRes && workspacesRes.length > 0) {
+          const primaryWs = (workspacesRes && workspacesRes.length > 0) ? workspacesRes[0] : null;
+          if (primaryWs && (primaryWs.status === "active" || primaryWs.status === "trialing" || primaryWs.role === "agent" || primaryWs.role === "admin")) {
             router.push("/dashboard");
+          } else if (primaryWs && primaryWs.status === "onboarding") {
+            router.push("/onboarding/subscription");
           } else {
-            router.push("/onboarding");
+            router.push("/onboarding/business");
           }
         } else {
           setError("Google sign-in did not return a valid session token. Please try again.");

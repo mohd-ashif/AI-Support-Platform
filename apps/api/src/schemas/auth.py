@@ -46,7 +46,7 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
-    workspaces: List[WorkspaceMemberInfo] = []
+    workspaces: List[Any] = []
 
 class RefreshResponse(BaseModel):
     access_token: str
