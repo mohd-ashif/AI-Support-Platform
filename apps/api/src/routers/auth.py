@@ -258,6 +258,12 @@ async def google_callback(
         client_secret = clean_setting(settings.GOOGLE_CLIENT_SECRET)
         email, name, google_id, avatar_url = None, None, None, None
 
+        last_error_text = ""
+        if not client_id or client_id.startswith("mock-"):
+            last_error_text = "GOOGLE_CLIENT_ID is missing or set to mock."
+        elif not client_secret or client_secret.startswith("mock-"):
+            last_error_text = "GOOGLE_CLIENT_SECRET is missing or set to mock."
+
         if client_id and not client_id.startswith("mock-") and client_secret and not client_secret.startswith("mock-"):
             redirect_candidates = []
             redirect_val = clean_setting(settings.GOOGLE_REDIRECT_URI)
@@ -275,7 +281,6 @@ async def google_callback(
                 if c and c not in dedup_candidates:
                     dedup_candidates.append(c)
 
-            last_error_text = ""
             for r_uri in dedup_candidates:
                 if email:
                     break
@@ -318,14 +323,15 @@ async def google_callback(
                                 except Exception as jwt_ex:
                                     logger.warning(f"Failed to decode id_token: {jwt_ex}")
                         else:
-                            last_error_text = token_resp.text
+                            last_error_text = f"{token_resp.status_code}: {token_resp.text}"
                             logger.warning(f"Google token exchange failed for URI {r_uri}: {token_resp.status_code} - {token_resp.text}")
                 except Exception as ex:
+                    last_error_text = str(ex)
                     logger.warning(f"Google OAuth network exchange failed for URI {r_uri}: {ex}")
 
         if not email and not google_id:
-            logger.error("Google OAuth failed: No email or sub retrieved from Google.")
-            err_detail = "Failed to obtain account details from Google OAuth. Please verify GOOGLE_CLIENT_ID/SECRET and GOOGLE_REDIRECT_URI settings."
+            logger.error(f"Google OAuth failed: No email or sub retrieved. Last error: {last_error_text}")
+            err_detail = f"Google OAuth failed. {last_error_text if last_error_text else 'Please verify GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET settings in Render.'}"
             frontend_callback = f"{frontend_base}/auth/callback?error={quote(err_detail)}"
             return RedirectResponse(url=frontend_callback)
 
