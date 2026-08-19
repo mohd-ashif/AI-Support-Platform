@@ -447,6 +447,16 @@ async def google_auth(
                             "grant_type": "authorization_code",
                         },
                     )
+                    if token_resp.status_code != 200:
+                        token_resp = await client.post(
+                            "https://oauth2.googleapis.com/token",
+                            auth=(client_id, client_secret),
+                            data={
+                                "code": payload.code,
+                                "redirect_uri": r_uri,
+                                "grant_type": "authorization_code",
+                            },
+                        )
                     if token_resp.status_code == 200:
                         token_data = token_resp.json()
                         userinfo_resp = await client.get(
