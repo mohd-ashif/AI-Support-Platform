@@ -38,7 +38,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     async function checkSession() {
-      if (pathname.startsWith("/auth/callback") || pathname.startsWith("/invite")) {
+      if (pathname.startsWith("/auth/callback") || pathname.startsWith("/callback") || pathname.startsWith("/invite")) {
         setInitializing(false);
         return;
       }
@@ -78,7 +78,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }, [dispatch, isAuthenticated, pathname]);
 
   useEffect(() => {
-    if (!mounted || initializing || pathname.startsWith("/auth/callback")) return;
+    if (!mounted || initializing || pathname.startsWith("/auth/callback") || pathname.startsWith("/callback")) return;
 
     const isAuthRoute = pathname.startsWith("/login") || pathname.startsWith("/signup");
     const isDashboardRoute = pathname.startsWith("/dashboard");

@@ -1,5 +1,3 @@
-import { redirect } from "next/navigation";
+import AuthCallbackPage from "@/app/(auth)/callback/page";
 
-export default function LegacyAuthCallbackRedirect() {
-  redirect("/callback");
-}
+export default AuthCallbackPage;
