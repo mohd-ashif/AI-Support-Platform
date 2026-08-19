@@ -171,15 +171,16 @@ async def logout(
     return {"message": "Logged out successfully"}
 
 def get_effective_backend_url(request: Request) -> str:
-    if settings.BACKEND_URL:
-        return settings.BACKEND_URL.rstrip("/")
     base = str(request.base_url).rstrip("/")
     if "onrender.com" in base:
-        base = base.replace("http://", "https://")
+        return base.replace("http://", "https://")
+    if settings.BACKEND_URL and "localhost" not in base and "127.0.0.1" not in base:
+        return settings.BACKEND_URL.rstrip("/")
     return base
 
 def get_google_redirect_uri(request: Request) -> str:
-    if settings.GOOGLE_REDIRECT_URI:
+    base = str(request.base_url).rstrip("/")
+    if settings.GOOGLE_REDIRECT_URI and ("localhost" in base or "127.0.0.1" in base):
         return settings.GOOGLE_REDIRECT_URI
     return f"{get_effective_backend_url(request)}/auth/google/callback"
 
@@ -210,13 +211,18 @@ async def get_google_auth_url(request: Request):
     return {"url": url}
 
 def get_effective_frontend_url(request: Request) -> str:
+    base = str(request.base_url).rstrip("/")
+    origin = request.headers.get("origin") or request.headers.get("referer") or ""
+    if "onrender.com" in base or "vercel.app" in origin:
+        if settings.FRONTEND_URL and "localhost" not in settings.FRONTEND_URL:
+            return settings.FRONTEND_URL.rstrip("/")
+        if origin:
+            from urllib.parse import urlparse
+            parsed = urlparse(origin)
+            return f"{parsed.scheme}://{parsed.netloc}"
+        return "https://ai-support-platform.vercel.app"
     if settings.FRONTEND_URL:
         return settings.FRONTEND_URL.rstrip("/")
-    origin = request.headers.get("origin") or request.headers.get("referer") or ""
-    if origin:
-        from urllib.parse import urlparse
-        parsed = urlparse(origin)
-        return f"{parsed.scheme}://{parsed.netloc}"
     return "http://localhost:3000"
 
 @router.get("/google/callback")
