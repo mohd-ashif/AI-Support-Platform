@@ -195,24 +195,32 @@ async def revoke_refresh_token(db: AsyncSession, raw_token: str) -> None:
 
 async def handle_google_user_info(
     db: AsyncSession,
-    email: str,
-    name: str,
-    google_id: str,
+    email: Optional[str],
+    name: Optional[str],
+    google_id: Optional[str],
     avatar_url: Optional[str] = None,
 ) -> User:
-    norm_email = email.strip().lower()
+    if not email and not google_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google profile did not provide a valid email or user identifier."
+        )
 
-    # Search by google_id first, then fallback to email
-    res = await db.execute(select(User).where(User.google_id == google_id))
-    user = res.scalars().first()
+    norm_email = email.strip().lower() if email else f"google_user_{google_id}@example.com"
+    user = None
 
-    if not user:
+    if google_id:
+        res = await db.execute(select(User).where(User.google_id == google_id))
+        user = res.scalars().first()
+
+    if not user and norm_email:
         user = await get_user_by_email(db, norm_email)
 
     if user:
-        user.google_id = google_id
+        if google_id:
+            user.google_id = google_id
         if name and name != "Google User" and (not user.name or user.name == "Google User"):
-            user.name = name
+            user.name = name.strip()
         if norm_email and "example.com" not in norm_email and ("example.com" in user.email or user.email.startswith("google_user_")):
             user.email = norm_email
         if avatar_url:
@@ -221,9 +229,10 @@ async def handle_google_user_info(
         await db.refresh(user)
         return user
 
+    display_name = name.strip() if name else (norm_email.split("@")[0] if norm_email else "Google User")
     user = User(
         email=norm_email,
-        name=name or norm_email.split("@")[0],
+        name=display_name,
         google_id=google_id,
         avatar_url=avatar_url,
     )

@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Cookie
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status, Cookie, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
@@ -221,12 +221,20 @@ def get_effective_frontend_url(request: Request) -> str:
 
 @router.get("/google/callback")
 async def google_callback(
-    code: str,
     request: Request,
+    code: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
     from urllib.parse import quote
     frontend_base = get_effective_frontend_url(request)
+
+    if error or not code:
+        err_msg = error or "Authorization code missing from Google redirect."
+        logger.warning(f"Google OAuth callback error: {err_msg}")
+        frontend_callback = f"{frontend_base}/auth/callback?error={quote(err_msg)}"
+        return RedirectResponse(url=frontend_callback)
+
     try:
         redirect_uri = get_google_redirect_uri(request)
         email, name, google_id, avatar_url = None, None, None, None

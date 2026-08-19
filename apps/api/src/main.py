@@ -135,6 +135,11 @@ async def on_startup():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
             for alter_sql in [
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR;",
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url VARCHAR;",
+                "ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS replaced_by_id VARCHAR;",
+                "ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS user_agent VARCHAR;",
+                "ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS ip_address VARCHAR;",
                 "ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS document_id VARCHAR;",
                 "ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS version_id VARCHAR;",
                 "ALTER TABLE knowledge_chunks ADD COLUMN IF NOT EXISTS chunk_index INTEGER DEFAULT 0;",
