@@ -244,6 +244,24 @@ async def google_start(request: Request):
     )
     return RedirectResponse(url=url)
 
+@router.get("/google/debug-config")
+async def google_debug_config(request: Request):
+    c_id = get_google_client_id()
+    c_sec = get_google_client_secret()
+    r_uri = get_google_redirect_uri(request)
+    f_url = get_effective_frontend_url(request)
+    
+    return {
+        "client_id_prefix": c_id[:12] + "..." if c_id else "EMPTY",
+        "client_id_suffix": "..." + c_id[-25:] if len(c_id) > 25 else c_id,
+        "client_id_length": len(c_id),
+        "client_secret_prefix": c_sec[:8] + "..." if c_sec else "EMPTY",
+        "client_secret_suffix": "..." + c_sec[-6:] if len(c_sec) > 6 else c_sec,
+        "client_secret_length": len(c_sec),
+        "redirect_uri": r_uri,
+        "effective_frontend_url": f_url,
+    }
+
 @router.get("/google/url")
 async def get_google_auth_url(request: Request):
     client_id = get_google_client_id()
