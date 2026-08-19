@@ -151,6 +151,11 @@ async def on_startup():
                 except Exception:
                     pass
         await run_data_migration()
+        try:
+            from apps.api.src.scripts.cleanup_google_placeholder_users import cleanup_placeholder_google_users
+            await cleanup_placeholder_google_users()
+        except Exception as cleanup_ex:
+            logger.warning(f"[STARTUP] Google placeholder cleanup note: {cleanup_ex}")
         logger.info("[STARTUP] Phase 1 database schema & tenant data migration completed successfully.")
     except Exception as e:
         logger.warning(f"[STARTUP] Phase 1 startup database init note: {e}")
