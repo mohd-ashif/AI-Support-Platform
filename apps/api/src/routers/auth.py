@@ -176,20 +176,23 @@ async def logout(
 def clean_setting(val: Optional[str]) -> str:
     if not val:
         return ""
-    return val.strip().strip('"').strip("'").rstrip("/")
+    return val.strip().strip('"').strip("'")
+
+def clean_url(val: Optional[str]) -> str:
+    return clean_setting(val).rstrip("/")
 
 def get_effective_backend_url(request: Request) -> str:
     base = str(request.base_url).rstrip("/")
     if "onrender.com" in base:
         return base.replace("http://", "https://")
-    backend_val = clean_setting(settings.BACKEND_URL)
+    backend_val = clean_url(settings.BACKEND_URL)
     if backend_val and "localhost" not in base and "127.0.0.1" not in base:
         return backend_val
     return base
 
 def get_google_redirect_uri(request: Request) -> str:
     base = get_effective_backend_url(request)
-    redirect_val = clean_setting(settings.GOOGLE_REDIRECT_URI)
+    redirect_val = clean_url(settings.GOOGLE_REDIRECT_URI)
     
     # If running on production (e.g. onrender.com), but GOOGLE_REDIRECT_URI has localhost,
     # override redirect_val to prevent invalid local redirects in production
@@ -233,7 +236,7 @@ async def get_google_auth_url(request: Request):
 def get_effective_frontend_url(request: Request) -> str:
     base = str(request.base_url).rstrip("/")
     origin = request.headers.get("origin") or request.headers.get("referer") or ""
-    frontend_val = clean_setting(settings.FRONTEND_URL)
+    frontend_val = clean_url(settings.FRONTEND_URL)
     if "onrender.com" in base or "vercel.app" in origin:
         if frontend_val and "localhost" not in frontend_val:
             return frontend_val
