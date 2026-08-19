@@ -270,3 +270,44 @@ async def test_13_rate_limiter_returns_429():
         )
     assert resp.status_code == 429
     assert "Retry-After" in resp.headers
+
+# 14. Handle Google User Info creates and updates real user profiles
+@pytest.mark.asyncio
+async def test_14_handle_google_user_info_creates_and_syncs_real_profile():
+    from apps.api.src.services.auth_service import handle_google_user_info
+    
+    async with TestingSessionLocal() as db:
+        # Create Google user
+        user = await handle_google_user_info(
+            db,
+            email="muhammedashif@gmail.com",
+            name="Muhammed Ashif",
+            google_id="google_sub_1001",
+            avatar_url="https://lh3.googleusercontent.com/a/avatar123",
+        )
+        assert user.email == "muhammedashif@gmail.com"
+        assert user.name == "Muhammed Ashif"
+        assert user.avatar_url == "https://lh3.googleusercontent.com/a/avatar123"
+
+        # Syncing again with updated name/avatar updates the existing user without creating duplicate
+        updated_user = await handle_google_user_info(
+            db,
+            email="muhammedashif@gmail.com",
+            name="Muhammed Ashif Updated",
+            google_id="google_sub_1001",
+            avatar_url="https://lh3.googleusercontent.com/a/avatar456",
+        )
+        assert updated_user.id == user.id
+        assert updated_user.name == "Muhammed Ashif Updated"
+        assert updated_user.avatar_url == "https://lh3.googleusercontent.com/a/avatar456"
+
+# 15. Google Auth URL endpoint returns valid authorization URL
+@pytest.mark.asyncio
+async def test_15_google_url_endpoint_returns_valid_url():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        resp = await ac.get("/auth/google/url")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "url" in data
+        assert "accounts.google.com" in data["url"]
+

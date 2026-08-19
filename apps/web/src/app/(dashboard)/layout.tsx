@@ -238,11 +238,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="pt-4 border-t border-[#1F1F1F] space-y-3">
           <div className="flex items-center justify-between px-2">
             <div className="flex items-center space-x-2.5 truncate">
-              <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-[#D4AF37] to-[#F4D03F] text-[#050505] font-bold text-xs flex items-center justify-center shrink-0 shadow-md shadow-[#D4AF37]/20">
-                {user?.name?.[0]?.toUpperCase() || "U"}
-              </div>
+              {user?.avatar_url ? (
+                <img
+                  src={user.avatar_url}
+                  alt={user.name || "User Avatar"}
+                  className="h-8 w-8 rounded-full object-cover shrink-0 border border-[#D4AF37]/30 shadow-md shadow-[#D4AF37]/20"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLElement).style.display = "none";
+                  }}
+                />
+              ) : null}
+              {(!user?.avatar_url) && (
+                <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-[#D4AF37] to-[#F4D03F] text-[#050505] font-bold text-xs flex items-center justify-center shrink-0 shadow-md shadow-[#D4AF37]/20">
+                  {user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || "U"}
+                </div>
+              )}
               <div className="truncate">
-                <p className="text-xs font-bold text-neutral-200 truncate">{user?.name || "User Account"}</p>
+                <p className="text-xs font-bold text-neutral-200 truncate">{user?.name || user?.email?.split('@')[0] || "User Account"}</p>
                 <p className="text-[10px] text-neutral-500 truncate">{user?.email}</p>
               </div>
             </div>

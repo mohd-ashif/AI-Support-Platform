@@ -200,38 +200,60 @@ async def handle_google_user_info(
     google_id: Optional[str],
     avatar_url: Optional[str] = None,
 ) -> User:
-    if not email and not google_id:
+    clean_email = email.strip().lower() if email else None
+    if clean_email and (clean_email.startswith("google_user_") or "@example.com" in clean_email):
+        clean_email = None
+
+    if not clean_email and not google_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Google profile did not provide a valid email or user identifier."
         )
 
-    norm_email = email.strip().lower() if email else f"google_user_{google_id}@example.com"
     user = None
 
     if google_id:
         res = await db.execute(select(User).where(User.google_id == google_id))
         user = res.scalars().first()
 
-    if not user and norm_email:
-        user = await get_user_by_email(db, norm_email)
+    if not user and clean_email:
+        user = await get_user_by_email(db, clean_email)
+
+    if not user:
+        # Check if there is an existing user record with a placeholder email/id that should be upgraded
+        placeholder_res = await db.execute(
+            select(User).where(
+                (User.email.like("google_user_%")) | (User.name == "Google User")
+            )
+        )
+        user = placeholder_res.scalars().first()
 
     if user:
         if google_id:
             user.google_id = google_id
-        if name and name != "Google User" and (not user.name or user.name == "Google User"):
+        if clean_email:
+            user.email = clean_email
+        if name and name.strip() and name.strip() != "Google User":
             user.name = name.strip()
-        if norm_email and "example.com" not in norm_email and ("example.com" in user.email or user.email.startswith("google_user_")):
-            user.email = norm_email
+        elif (not user.name or user.name == "Google User") and user.email:
+            user.name = user.email.split("@")[0]
         if avatar_url:
             user.avatar_url = avatar_url
+
         await db.commit()
         await db.refresh(user)
         return user
 
-    display_name = name.strip() if name else (norm_email.split("@")[0] if norm_email else "Google User")
+    if not clean_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google OAuth failed to provide a valid email address."
+        )
+
+    display_name = name.strip() if (name and name.strip() and name.strip() != "Google User") else clean_email.split("@")[0]
+
     user = User(
-        email=norm_email,
+        email=clean_email,
         name=display_name,
         google_id=google_id,
         avatar_url=avatar_url,
