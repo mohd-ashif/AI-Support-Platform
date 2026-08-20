@@ -1,4 +1,17 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const getCleanApiBaseUrl = (): string => {
+  let raw = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+  raw = raw.trim();
+  if (raw.includes("=")) {
+    const parts = raw.split("=");
+    raw = parts[parts.length - 1].trim();
+  }
+  while ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith("`") && raw.endsWith("`"))) {
+    raw = raw.slice(1, -1).trim();
+  }
+  return raw.replace(/\/+$/, "");
+};
+
+export const API_BASE_URL = getCleanApiBaseUrl();
 
 let memoryAccessToken: string | null = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
 let refreshPromise: Promise<string | null> | null = null;

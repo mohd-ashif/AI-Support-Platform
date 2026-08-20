@@ -12,4 +12,4 @@ COPY . /app
 
 ENV PYTHONPATH=/app
 
-CMD ["uvicorn", "apps.api.src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn apps.api.src.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

@@ -1,4 +1,4 @@
-import { apiFetch, getMemoryAccessToken, getMemoryWorkspaceId } from "@/lib/api";
+import { apiFetch, getMemoryAccessToken, getMemoryWorkspaceId, API_BASE_URL } from "@/lib/api";
 import { WebSource, FileSource } from "@/types";
 
 export interface CloudinarySignatureResponse {
@@ -60,7 +60,7 @@ export const sourcesService = {
 
     const token = getMemoryAccessToken();
     const activeWsId = workspaceId || getMemoryWorkspaceId() || "";
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const apiBase = API_BASE_URL;
 
     const res = await fetch(`${apiBase}/sources/files`, {
       method: "POST",

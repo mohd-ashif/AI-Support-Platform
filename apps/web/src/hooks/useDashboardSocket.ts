@@ -4,7 +4,7 @@ import { RootState } from "@/store";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/queryKeys";
 import { useNotificationStore } from "@/stores/useNotificationStore";
-import { io, Socket } from "socket.io-client";
+import { API_BASE_URL } from "@/lib/api";
 
 function triggerBrowserNotification(title: string, body: string) {
   if (typeof window !== "undefined" && "Notification" in window) {
@@ -34,7 +34,7 @@ export function useDashboardSocket() {
       Notification.requestPermission();
     }
 
-    const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const API_URL = API_BASE_URL;
     const socket = io(API_URL, {
       transports: ["websocket", "polling"],
       auth: { token: accessToken },
